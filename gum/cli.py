@@ -4,6 +4,7 @@ load_dotenv(find_dotenv(usecwd=True))
 import os
 import argparse
 import asyncio
+import logging
 import shutil  
 from gum import gum
 from gum.observers import Screen
@@ -89,7 +90,9 @@ async def main():
             model, 
             Screen(model, debug=True),  # Enable debug to see Screen observer logs
             min_batch_size=min_batch_size,
-            max_batch_size=max_batch_size
+            max_batch_size=max_batch_size,
+            enable_mixed_initiative=True,  # Enable mixed-initiative functionality
+            verbosity=logging.DEBUG  # Enable DEBUG logging to see mixed-initiative logs
         ) as gum_instance:
             await asyncio.Future()  # run forever (Ctrl-C to stop)
 
