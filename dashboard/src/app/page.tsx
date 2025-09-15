@@ -39,12 +39,40 @@ export default function PropositionsPage() {
 
   useEffect(() => {
     fetchPropositions();
+
+    // Lightweight polling to auto-refresh while CLI runs
+    let isCancelled = false;
+    const POLL_MS = 3000;
+
+    const silentRefresh = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/propositions?limit=50', {
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const data: PropositionsResponse = await response.json();
+        if (!isCancelled) {
+          setPropositions(data.propositions);
+          setTotalCount(data.total_count);
+        }
+      } catch {
+        // swallow errors in background polling to avoid UI interruptions
+      }
+    };
+
+    const id = setInterval(silentRefresh, POLL_MS);
+    return () => {
+      isCancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   const fetchPropositions = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/propositions?limit=50');
+      const response = await fetch('http://localhost:8000/api/propositions?limit=50', {
+        cache: 'no-store',
+      });
       
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
