@@ -1,12 +1,14 @@
 name: Deploy Documentation
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  # Disabled automatic deployment - uncomment to re-enable
+  # push:
+  #   branches:
+  #     - main
+  # pull_request:
+  #   branches:
+  #     - main
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
   deploy:
