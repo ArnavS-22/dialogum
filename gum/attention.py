@@ -45,7 +45,7 @@ class AttentionMonitor:
     def __init__(self, 
                  history_window_seconds: int = 300,  # 5 minutes
                  update_interval: float = 2.0,
-                 debug: bool = True):
+                 debug: bool = False):
         """
         Initialize attention monitor.
         
@@ -104,17 +104,22 @@ class AttentionMonitor:
             result = subprocess.run([
                 'osascript', '-e', 
                 'tell application "System Events" to get name of first application process whose frontmost is true'
-            ], capture_output=True, text=True, timeout=1)
+            ], capture_output=True, text=True, timeout=2)
             
-            if result.returncode == 0:
+            if result.returncode == 0 and result.stdout.strip():
                 app_name = result.stdout.strip().lower()
                 return app_name
             else:
                 return "unknown"
                 
+        except subprocess.TimeoutExpired:
+            logger.debug("App detection timed out, using fallback")
+            return "unknown"
+        except FileNotFoundError:
+            logger.debug("osascript not found, likely not on macOS")
+            return "unknown"
         except Exception as e:
-            if self.debug:
-                logger.warning(f"Could not get active application: {e}")
+            logger.debug(f"Could not get active application: {e}")
             return "unknown"
     
     def classify_app_focus_level(self, app_name: str) -> float:
@@ -270,8 +275,8 @@ class AttentionMonitor:
                 time.sleep(self.update_interval)
                 
             except Exception as e:
-                if self.debug:
-                    logger.error(f"Error in attention monitoring loop: {e}")
+                logger.error(f"Error in attention monitoring loop: {e}")
+                # Continue monitoring even if individual updates fail
                 time.sleep(self.update_interval)
     
     def get_current_attention(self) -> AttentionState:

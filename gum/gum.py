@@ -35,6 +35,7 @@ from gum.prompts.gum import AUDIT_PROMPT, PROPOSE_PROMPT, REVISE_PROMPT, SIMILAR
 from .batcher import ObservationBatcher
 from .decision import MixedInitiativeDecisionEngine, DecisionContext
 from .attention import AttentionMonitor
+from .config import GumConfig
 
 class gum:
     """A class for managing general user models.
@@ -75,6 +76,7 @@ class gum:
         min_batch_size: int = 5,
         max_batch_size: int = 50,
         enable_mixed_initiative: bool = True,
+        config: GumConfig | None = None,
     ):
         # basic paths
         data_directory = os.path.expanduser(data_directory)
@@ -128,9 +130,19 @@ class gum:
         
         # Mixed-initiative decision engine
         self.enable_mixed_initiative = enable_mixed_initiative
+        self.config = config or GumConfig()
+        
         if self.enable_mixed_initiative:
-            self.decision_engine = MixedInitiativeDecisionEngine(debug=(verbosity <= logging.INFO))
-            self.attention_monitor = AttentionMonitor(debug=(verbosity <= logging.INFO))
+            debug_mode = (verbosity <= logging.DEBUG)
+            self.decision_engine = MixedInitiativeDecisionEngine(
+                config=self.config.decision, 
+                debug=debug_mode
+            )
+            self.attention_monitor = AttentionMonitor(
+                history_window_seconds=self.config.attention.history_window_seconds,
+                update_interval=self.config.attention.update_interval,
+                debug=debug_mode
+            )
             self.logger.info("Mixed-initiative decision engine enabled")
         else:
             self.decision_engine = None
@@ -507,7 +519,7 @@ class gum:
         # Generate revised propositions
         revised_items = await self._revise_propositions(list(rel_obs), similar)
         
-        # Delete all old similar propositions
+        # Delete the propositions - cascade deletion will handle the relationships
         for prop in similar:
             await session.delete(prop)
         
@@ -526,7 +538,8 @@ class gum:
             session.add(new_prop)
             
             # Evaluate revised proposition for mixed-initiative action
-            self._evaluate_proposition_for_action(new_prop)
+            if self.enable_mixed_initiative:
+                self._evaluate_proposition_for_action(new_prop)
 
         await session.flush()
 
@@ -538,7 +551,8 @@ class gum:
                 await self._attach_obs_if_missing(p, obs, session)
             
             # Evaluate new proposition for mixed-initiative action
-            self._evaluate_proposition_for_action(p)
+            if self.enable_mixed_initiative:
+                self._evaluate_proposition_for_action(p)
 
     async def _handle_audit(self, obs: Observation) -> bool:
         if not self.audit_enabled:
@@ -629,28 +643,36 @@ class gum:
         if not self.decision_engine or not self.attention_monitor:
             return
             
-        # Get real attention assessment
-        attention_state = self.attention_monitor.get_current_attention()
-        
-        context = DecisionContext(
-            proposition=proposition,
-            user_attention_level=attention_state.focus_level,
-            active_application=attention_state.active_application,
-            idle_time_seconds=attention_state.idle_time_seconds
-        )
-        
-        decision, metadata = self.decision_engine.make_decision(context)
-        
-        # For now, just log what we would do
-        self.logger.info(f"🤖 Decision for proposition '{proposition.text[:50]}...': {decision}")
-        self.logger.info(f"   Confidence: {metadata['confidence']}/10, "
-                        f"Attention: {metadata['attention_level']:.2f}, "
-                        f"App: {metadata['active_app']}")
-        
-        # TODO: Later this will trigger actual actions:
-        # - "no_action": Just store the proposition  
-        # - "dialogue": Trigger GATE question generation
-        # - "autonomous_action": Show proactive suggestion
+        try:
+            # Get real attention assessment
+            attention_state = self.attention_monitor.get_current_attention()
+            
+            context = DecisionContext(
+                proposition=proposition,
+                user_attention_level=attention_state.focus_level,
+                active_application=attention_state.active_application,
+                idle_time_seconds=attention_state.idle_time_seconds
+            )
+            
+            decision, metadata = self.decision_engine.make_decision(context)
+            
+            # Log decision with appropriate level
+            if decision != "no_action":
+                self.logger.info(f"🤖 Decision for proposition '{proposition.text[:50]}...': {decision}")
+                self.logger.info(f"   Confidence: {metadata['confidence']}/10, "
+                                f"Attention: {metadata['attention_level']:.2f}, "
+                                f"App: {metadata['active_app']}")
+            else:
+                self.logger.debug(f"No action for proposition: {proposition.text[:30]}...")
+            
+            # TODO: Later this will trigger actual actions:
+            # - "no_action": Just store the proposition  
+            # - "dialogue": Trigger GATE question generation
+            # - "autonomous_action": Show proactive suggestion
+            
+        except Exception as e:
+            self.logger.error(f"Error evaluating proposition for action: {e}")
+            # Continue processing - don't let decision errors break GUM
 
     def add_observer(self, observer: Observer):
         """Add an observer to track user behavior.

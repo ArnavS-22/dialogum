@@ -87,7 +87,7 @@ async def main():
         async with gum(
             user_name, 
             model, 
-            Screen(model),
+            Screen(model, debug=True),  # Enable debug to see Screen observer logs
             min_batch_size=min_batch_size,
             max_batch_size=max_batch_size
         ) as gum_instance:
