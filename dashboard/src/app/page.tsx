@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
+import { BorderTrail } from "@/components/ui/border-trail";
 
 interface MixedInitiativeScore {
   decision: string;
@@ -94,7 +95,7 @@ export default function PropositionsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+      <div className="min-h-screen bg-black p-8">
         <div className="mx-auto max-w-6xl">
           <div className="flex items-center justify-center h-64">
             <div className="text-white text-xl">Loading propositions...</div>
@@ -106,7 +107,7 @@ export default function PropositionsPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+      <div className="min-h-screen bg-black p-8">
         <div className="mx-auto max-w-6xl">
           <div className="rounded-xl bg-red-500/20 p-6 backdrop-blur-sm border border-red-500/30">
             <h2 className="text-xl font-semibold text-red-400 mb-2">Error Loading Propositions</h2>
@@ -121,7 +122,7 @@ export default function PropositionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+    <div className="min-h-screen bg-black p-8">
       <div className="mx-auto max-w-6xl">
         {/* Simple Header */}
         <div className="mb-8">
@@ -135,23 +136,27 @@ export default function PropositionsPage() {
 
         {/* Simple Stats */}
         <div className="grid grid-cols-4 gap-4 mb-8">
-          <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+          <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+            <BorderTrail size={40} />
             <div className="text-2xl font-bold text-white">{totalCount}</div>
             <div className="text-sm text-gray-300">Total</div>
           </div>
-          <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+          <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+            <BorderTrail size={40} />
             <div className="text-2xl font-bold text-green-400">
               {propositions.filter(p => p.mixed_initiative_score?.decision === 'autonomous_action').length}
             </div>
             <div className="text-sm text-gray-300">Auto</div>
           </div>
-          <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+          <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+            <BorderTrail size={40} />
             <div className="text-2xl font-bold text-yellow-400">
               {propositions.filter(p => p.mixed_initiative_score?.decision === 'dialogue').length}
             </div>
             <div className="text-sm text-gray-300">Dialogue</div>
           </div>
-          <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+          <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
+            <BorderTrail size={40} />
             <div className="text-2xl font-bold text-blue-400">
               {Math.round(propositions.reduce((acc, p) => acc + (p.confidence || 0), 0) / propositions.length * 10) / 10}
             </div>
@@ -164,8 +169,9 @@ export default function PropositionsPage() {
           {propositions.map((proposition) => (
             <div
               key={proposition.id}
-              className="rounded-xl bg-white/10 p-6 backdrop-blur-sm border border-white/20 hover:bg-white/15 transition-all duration-300"
+              className="relative rounded-xl bg-white/10 p-6 backdrop-blur-sm border border-white/20 hover:bg-white/15 transition-all duration-300"
             >
+              <BorderTrail size={60} />
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <h3 className="text-lg font-semibold text-white mb-2">
