@@ -33,6 +33,8 @@ from .schemas import (
 )
 from gum.prompts.gum import AUDIT_PROMPT, PROPOSE_PROMPT, REVISE_PROMPT, SIMILAR_PROMPT
 from .batcher import ObservationBatcher
+from .decision import MixedInitiativeDecisionEngine, DecisionContext
+from .attention import AttentionMonitor
 
 class gum:
     """A class for managing general user models.
@@ -72,6 +74,7 @@ class gum:
         api_key: str | None = None,
         min_batch_size: int = 5,
         max_batch_size: int = 50,
+        enable_mixed_initiative: bool = True,
     ):
         # basic paths
         data_directory = os.path.expanduser(data_directory)
@@ -122,6 +125,16 @@ class gum:
         self._batch_task: asyncio.Task | None = None
         self._batch_processing_lock = asyncio.Lock()
         self.update_handlers: list[Callable[[Observer, Update], None]] = []
+        
+        # Mixed-initiative decision engine
+        self.enable_mixed_initiative = enable_mixed_initiative
+        if self.enable_mixed_initiative:
+            self.decision_engine = MixedInitiativeDecisionEngine(debug=(verbosity <= logging.INFO))
+            self.attention_monitor = AttentionMonitor(debug=(verbosity <= logging.INFO))
+            self.logger.info("Mixed-initiative decision engine enabled")
+        else:
+            self.decision_engine = None
+            self.attention_monitor = None
 
     def start_update_loop(self):
         """Start the asynchronous update loop for processing observer updates."""
@@ -131,6 +144,10 @@ class gum:
         # Start batch processing if enabled
         if self._batch_task is None:
             self._batch_task = asyncio.create_task(self._batch_processing_loop())
+            
+        # Start attention monitoring if enabled
+        if self.attention_monitor:
+            self.attention_monitor.start_monitoring()
 
     async def stop_update_loop(self):
         """Stop the asynchronous update loop and clean up resources."""
@@ -153,6 +170,10 @@ class gum:
             
         if self.batcher:
             await self.batcher.stop()
+            
+        # Stop attention monitoring if enabled
+        if self.attention_monitor:
+            self.attention_monitor.stop_monitoring()
 
     async def connect_db(self):
         """Initialize the database connection if not already connected."""
@@ -503,6 +524,9 @@ class gum:
                 observations=rel_obs,
             )
             session.add(new_prop)
+            
+            # Evaluate revised proposition for mixed-initiative action
+            self._evaluate_proposition_for_action(new_prop)
 
         await session.flush()
 
@@ -512,6 +536,9 @@ class gum:
         for p in different:
             for obs in observations:
                 await self._attach_obs_if_missing(p, obs, session)
+            
+            # Evaluate new proposition for mixed-initiative action
+            self._evaluate_proposition_for_action(p)
 
     async def _handle_audit(self, obs: Observation) -> bool:
         if not self.audit_enabled:
@@ -593,6 +620,37 @@ class gum:
             .values(observation_id=obs.id, proposition_id=prop.id)
         )
         prop.updated_at = datetime.now(timezone.utc)
+    
+    def _evaluate_proposition_for_action(self, proposition: Proposition) -> None:
+        """
+        Evaluate a proposition using the mixed-initiative decision engine.
+        For now, just logs the decision. Later will trigger actual actions.
+        """
+        if not self.decision_engine or not self.attention_monitor:
+            return
+            
+        # Get real attention assessment
+        attention_state = self.attention_monitor.get_current_attention()
+        
+        context = DecisionContext(
+            proposition=proposition,
+            user_attention_level=attention_state.focus_level,
+            active_application=attention_state.active_application,
+            idle_time_seconds=attention_state.idle_time_seconds
+        )
+        
+        decision, metadata = self.decision_engine.make_decision(context)
+        
+        # For now, just log what we would do
+        self.logger.info(f"🤖 Decision for proposition '{proposition.text[:50]}...': {decision}")
+        self.logger.info(f"   Confidence: {metadata['confidence']}/10, "
+                        f"Attention: {metadata['attention_level']:.2f}, "
+                        f"App: {metadata['active_app']}")
+        
+        # TODO: Later this will trigger actual actions:
+        # - "no_action": Just store the proposition  
+        # - "dialogue": Trigger GATE question generation
+        # - "autonomous_action": Show proactive suggestion
 
     def add_observer(self, observer: Observer):
         """Add an observer to track user behavior.
