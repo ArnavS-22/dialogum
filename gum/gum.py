@@ -76,6 +76,7 @@ class gum:
         min_batch_size: int = 5,
         max_batch_size: int = 50,
         enable_mixed_initiative: bool = True,
+        discard_backlog_on_start: bool = False,
         config: GumConfig | None = None,
     ):
         # basic paths
@@ -120,7 +121,8 @@ class gum:
         self.batcher = ObservationBatcher(
             data_directory=data_directory,
             min_batch_size=min_batch_size,
-            max_batch_size=max_batch_size
+            max_batch_size=max_batch_size,
+            discard_backlog_on_start=discard_backlog_on_start
         )
 
         self._loop_task: asyncio.Task | None = None

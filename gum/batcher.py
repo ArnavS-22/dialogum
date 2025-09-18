@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import shutil
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -9,23 +10,39 @@ from persistqueue import Queue
 class ObservationBatcher:
     """A persistent queue for batching observations to reduce API calls."""
     
-    def __init__(self, data_directory: str, min_batch_size: int = 5, max_batch_size: int = 50):
+    def __init__(self, data_directory: str, min_batch_size: int = 5, max_batch_size: int = 50, discard_backlog_on_start: bool = False):
         self.data_directory = Path(data_directory)
         self.min_batch_size = min_batch_size
         self.max_batch_size = max_batch_size
+        self.discard_backlog_on_start = discard_backlog_on_start
         
         # Create persistent queue backed by SQLite
         queue_dir = self.data_directory / "batches"
         queue_dir.mkdir(parents=True, exist_ok=True)
-        self._queue = Queue(path=str(queue_dir / "queue"))
+        self._queue_path = queue_dir / "queue"
+        self._queue = Queue(path=str(self._queue_path))
         
         self._batch_ready_event = asyncio.Event()        
         self.logger = logging.getLogger("gum.batcher")
         
     async def start(self):
         """Start the batching system."""
+        size = self._queue.qsize()
+        if self.discard_backlog_on_start and size:
+            try:
+                # Prefer native clear if available
+                clear_fn = getattr(self._queue, "clear", None)
+                if callable(clear_fn):
+                    clear_fn()
+                else:
+                    shutil.rmtree(self._queue_path, ignore_errors=True)
+                    # Recreate an empty queue
+                    self._queue = Queue(path=str(self._queue_path))
+                self.logger.info(f"Discarded {size} queued observations from previous sessions")
+            except Exception as e:
+                self.logger.warning(f"Failed to discard backlog: {e}")
+
         self.logger.info(f"Started batcher with {self._queue.qsize()} items in queue")
-        
         if self.should_process_batch():
             self._batch_ready_event.set()
         

@@ -34,6 +34,7 @@ def parse_args():
     # Batching configuration arguments
     parser.add_argument('--min-batch-size', type=int, help='Minimum number of observations to trigger batch processing')
     parser.add_argument('--max-batch-size', type=int, help='Maximum number of observations per batch')
+    parser.add_argument('--discard-backlog', action='store_true', help='Discard any persisted batch backlog on startup')
 
     args = parser.parse_args()
 
@@ -61,6 +62,7 @@ async def main():
     # Batching configuration - follow same pattern as other args    
     min_batch_size = args.min_batch_size or int(os.getenv('MIN_BATCH_SIZE', '5'))
     max_batch_size = args.max_batch_size or int(os.getenv('MAX_BATCH_SIZE', '15'))
+    discard_backlog = args.discard_backlog or (os.getenv('DISCARD_BACKLOG', 'false').lower() in ['1','true','yes'])
 
     # you need one or the other
     if user_name is None and args.query is None:
@@ -91,6 +93,7 @@ async def main():
             Screen(model, debug=True),  # Enable debug to see Screen observer logs
             min_batch_size=min_batch_size,
             max_batch_size=max_batch_size,
+            discard_backlog_on_start=discard_backlog,
             enable_mixed_initiative=True,  # Enable mixed-initiative functionality
             verbosity=logging.DEBUG  # Enable DEBUG logging to see mixed-initiative logs
         ) as gum_instance:

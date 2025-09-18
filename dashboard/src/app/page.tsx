@@ -186,7 +186,11 @@ export default function PropositionsPage() {
           <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <BorderTrail size={40} />
             <div className="text-2xl font-bold text-blue-400">
-              {Math.round(propositions.reduce((acc, p) => acc + (p.confidence || 0), 0) / propositions.length * 10) / 10}
+              {propositions.length > 0
+                ? Math.round(
+                    (propositions.reduce((acc, p) => acc + (p.confidence || 0), 0) / propositions.length) * 10
+                  ) / 10
+                : 0}
             </div>
             <div className="text-sm text-gray-300">Avg Conf</div>
           </div>

@@ -49,34 +49,94 @@ class PropositionsListResponse(BaseModel):
     total_count: int
 
 # Database path
-db_path = os.path.expanduser("~/.cache/gum/gum.db")
+# Allow override for testing and deployment
+db_path = os.getenv("GUM_DB_PATH", os.path.expanduser("~/.cache/gum/gum.db"))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Mixed-initiative engine integration (real engine, attention monitor)
+# ──────────────────────────────────────────────────────────────────────────────
+try:
+    # Import real engine and attention monitor from GUM
+    from gum.decision import MixedInitiativeDecisionEngine, DecisionContext
+    from gum.attention import AttentionMonitor
+    from gum.models import Proposition
+
+    _ENGINE: MixedInitiativeDecisionEngine | None = None
+    _ATTN: AttentionMonitor | None = None
+
+    @app.on_event("startup")
+    async def _startup_init_engine():
+        # Initialize decision engine and start attention monitoring in background
+        # Fail gracefully if environment is missing dependencies (e.g., non‑macOS)
+        global _ENGINE, _ATTN
+        try:
+            _ENGINE = MixedInitiativeDecisionEngine(debug=False)
+            _ATTN = AttentionMonitor(debug=False)
+            _ATTN.start_monitoring()
+        except Exception:
+            _ENGINE = None
+            _ATTN = None
+
+    @app.on_event("shutdown")
+    async def _shutdown_stop_engine():
+        global _ATTN
+        try:
+            if _ATTN:
+                _ATTN.stop_monitoring()
+        except Exception:
+            pass
+except Exception:
+    # If imports fail, leave uninitialized. Downstream calls will error (no fallback).
+    _ENGINE = None
+    _ATTN = None
 
 def calculate_mixed_initiative_score(proposition_data: dict) -> Dict[str, Any]:
-    """Calculate mixed-initiative score for a proposition"""
-    confidence = proposition_data.get('confidence', 5)
-    confidence_normalized = confidence / 10.0
-    
-    # Mock attention level (would come from attention monitor)
-    attention_level = 0.07  # Mock low attention
-    
-    # Mock decision calculation
-    if confidence_normalized > 0.8:
-        decision = "autonomous_action"
-        expected_utility = 0.8 + (attention_level * 0.2)
-    elif confidence_normalized > 0.5:
-        decision = "dialogue"
-        expected_utility = 0.5 + (attention_level * 0.3)
-    else:
-        decision = "no_action"
-        expected_utility = 0.2
-    
-    return {
-        "decision": decision,
-        "expected_utility": round(expected_utility, 3),
-        "confidence_normalized": round(confidence_normalized, 3),
-        "attention_level": attention_level,
-        "interruption_cost": round(-attention_level * 2, 3)
-    }
+    """Calculate mixed-initiative score for a proposition using the real engine only.
+
+    No fallback. If the engine or attention monitor are unavailable, raise 500.
+    """
+    try:
+        if _ENGINE is None or _ATTN is None:
+            raise HTTPException(status_code=500, detail="Mixed-initiative engine/attention not initialized")
+
+        # Get current attention state
+        attn = _ATTN.get_current_attention()
+
+        # Build a lightweight Proposition object for decision context
+        prop = Proposition(
+            text=proposition_data.get('text', '') or '',
+            reasoning=proposition_data.get('reasoning', '') or '',
+            confidence=proposition_data.get('confidence', 5) or 5,
+        )
+
+        decision, metadata = _ENGINE.make_decision(DecisionContext(
+            proposition=prop,
+            user_attention_level=attn.focus_level,
+            active_application=attn.active_application,
+            idle_time_seconds=attn.idle_time_seconds,
+        ))
+
+        # Extract expected utility for chosen action
+        eus = metadata.get("expected_utilities", {})
+        eu_for_choice = eus.get(decision)
+        utilities_used = metadata.get("utilities_used", {})
+
+        # Approximate an interruption cost signal from dialogue false-utility
+        interruption_cost = -utilities_used.get("u_dialogue_goal_false", 0.0)
+
+        return {
+            "decision": decision,
+            "expected_utility": round(eu_for_choice, 3) if eu_for_choice is not None else None,
+            "confidence_normalized": round((metadata.get("confidence", 5) / 10.0), 3),
+            "attention_level": round(metadata.get("attention_level", attn.focus_level), 3),
+            "interruption_cost": round(interruption_cost, 3),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Explicit failure — caller gets 500; we do not fabricate decisions
+        raise HTTPException(status_code=500, detail=f"Decision engine error: {e}")
 
 @app.get("/api/propositions", response_model=PropositionsListResponse)
 async def get_propositions(
