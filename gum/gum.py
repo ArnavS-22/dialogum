@@ -23,6 +23,7 @@ from .db_utils import (
 )
 from .models import Observation, Proposition, init_db
 from .observers import Observer
+from .memory_service import LongTermMemoryService, MemoryServiceConfig
 from .schemas import (
     PropositionItem,
     PropositionSchema,
@@ -77,6 +78,8 @@ class gum:
         max_batch_size: int = 50,
         enable_mixed_initiative: bool = True,
         config: GumConfig | None = None,
+        memory_enabled: bool = True,
+        memory_trigger_count: int = 30,
     ):
         # basic paths
         data_directory = os.path.expanduser(data_directory)
@@ -91,6 +94,12 @@ class gum:
         # batching configuration
         self.min_batch_size = min_batch_size
         self.max_batch_size = max_batch_size
+        
+        # memory generation configuration
+        self.memory_enabled = memory_enabled
+        self.memory_trigger_count = memory_trigger_count
+        self._proposition_count = 0
+        self._counter_file = os.path.join(data_directory, "proposition_counter.txt")
 
         # logging
         self.logger = logging.getLogger("gum")
@@ -115,6 +124,20 @@ class gum:
         self.Session = None
         self._db_name        = db_name
         self._data_directory = data_directory
+        
+        # Initialize memory service
+        if self.memory_enabled:
+            memory_config = MemoryServiceConfig(model=self.model, temperature=0.1)
+            self.memory_service = LongTermMemoryService(
+                openai_client=self.client,
+                config=memory_config,
+                logger=self.logger
+            )
+        else:
+            self.memory_service = None
+        
+        # Load proposition counter from file
+        self._load_proposition_counter()
 
         # Initialize batcher if enabled
         self.batcher = ObservationBatcher(
@@ -299,6 +322,9 @@ class gum:
                 await self._handle_identical(session, identical, observations)
                 await self._handle_similar(session, similar, observations)
                 await self._handle_different(session, different, observations)
+                
+                # Update proposition counter and check for memory generation trigger
+                await self._update_proposition_counter(session, len(different))
                 
                 # Observations are already removed from queue by pop_batch()
                 self.logger.info(f"Completed processing batch of {len(batched_observations)} observations")
@@ -728,4 +754,88 @@ class gum:
                 mode=mode,
                 start_time=start_time,
                 end_time=end_time,
+            )
+    
+    def _load_proposition_counter(self):
+        """Load proposition counter from file."""
+        try:
+            if os.path.exists(self._counter_file):
+                with open(self._counter_file, 'r') as f:
+                    self._proposition_count = int(f.read().strip())
+                self.logger.debug(f"Loaded proposition counter: {self._proposition_count}")
+            else:
+                self._proposition_count = 0
+                self.logger.debug("Counter file not found, starting from 0")
+        except Exception as e:
+            self.logger.warning(f"Failed to load proposition counter: {e}, starting from 0")
+            self._proposition_count = 0
+    
+    def _save_proposition_counter(self):
+        """Save proposition counter to file."""
+        try:
+            with open(self._counter_file, 'w') as f:
+                f.write(str(self._proposition_count))
+            self.logger.debug(f"Saved proposition counter: {self._proposition_count}")
+        except Exception as e:
+            self.logger.error(f"Failed to save proposition counter: {e}")
+    
+    async def _update_proposition_counter(self, session: AsyncSession, new_propositions: int):
+        """Update proposition counter and trigger memory generation if threshold reached."""
+        if not self.memory_enabled or not self.memory_service or new_propositions == 0:
+            return
+        
+        self._proposition_count += new_propositions
+        self._save_proposition_counter()
+        
+        self.logger.debug(f"Updated proposition counter: {self._proposition_count} (+{new_propositions})")
+        
+        # Check if we should trigger memory generation
+        if self._proposition_count >= self.memory_trigger_count:
+            self.logger.info(f"🧠 Proposition count reached {self._proposition_count}, triggering memory generation...")
+            
+            # Trigger memory generation in background with new session
+            asyncio.create_task(self._trigger_memory_generation())
+            
+            # Reset counter
+            self._proposition_count = 0
+            self._save_proposition_counter()
+    
+    async def _trigger_memory_generation(self):
+        """Trigger memory generation in background."""
+        try:
+            self.logger.info("🧠 Starting memory generation process...")
+            
+            # Create new session for memory generation
+            async with self._session() as session:
+                # Generate memories using the memory service
+                memories = await self.memory_service.generate_long_term_memory(
+                    user_id=self.user_name,
+                    session=session,
+                    force_generation=True
+                )
+            
+            if memories:
+                self.logger.info(f"🎉 Successfully generated {len(memories)} long-term memories")
+                for memory in memories:
+                    self.logger.info(f"   • [{memory.category}] {memory.generalization[:100]}...")
+            else:
+                self.logger.info("🤷 Memory generation completed but no memories were created")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Memory generation failed: {e}")
+            self.logger.debug(f"Memory generation traceback: {traceback.format_exc()}")
+    
+    async def generate_memory_manually(self):
+        """Manually trigger memory generation for testing/admin purposes."""
+        if not self.memory_enabled or not self.memory_service:
+            self.logger.warning("Memory generation is disabled")
+            return None
+        
+        self.logger.info("🔧 Manual memory generation triggered...")
+        
+        async with self._session() as session:
+            return await self.memory_service.generate_long_term_memory(
+                user_id=self.user_name,
+                session=session,
+                force_generation=True
             )

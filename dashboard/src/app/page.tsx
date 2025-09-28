@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { BorderTrail } from "@/components/ui/border-trail";
+import { Navigation } from "@/components/navigation";
 
 interface MixedInitiativeScore {
   decision: string;
@@ -150,17 +151,18 @@ export default function PropositionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black p-8">
-      <div className="mx-auto max-w-6xl">
-        {/* Simple Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">
-            GUM Propositions
-          </h1>
-          <p className="text-gray-300">
-            {totalCount} propositions • Mixed-initiative decisions
-          </p>
-        </div>
+    <>
+      <Navigation />
+      
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold text-white mb-2">
+          GUM Propositions
+        </h1>
+        <p className="text-gray-300">
+          {totalCount} propositions • Mixed-initiative decisions
+        </p>
+      </div>
 
         {/* Simple Stats */}
         <div className="grid grid-cols-4 gap-4 mb-8">
@@ -245,7 +247,6 @@ export default function PropositionsPage() {
             </LiquidButton>
           </div>
         )}
-      </div>
-    </div>
+    </>
   );
 }

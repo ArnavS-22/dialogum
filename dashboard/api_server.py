@@ -25,7 +25,7 @@ from sqlalchemy import create_engine, text, select, func
 from sqlalchemy.orm import sessionmaker
 
 # Import GUM models
-from gum.models import Proposition, Observation, init_db
+from gum.models import Proposition, Observation, LongTermMemory, init_db
 
 app = FastAPI(title="GUM Dashboard API")
 
@@ -55,6 +55,24 @@ class PropositionResponse(BaseModel):
 
 class PropositionsListResponse(BaseModel):
     propositions: List[PropositionResponse]
+    total_count: int
+
+
+class MemoryResponse(BaseModel):
+    id: int
+    category: str
+    generalization: str
+    supporting_prop_ids: List[int]
+    rationale: str
+    first_seen: str
+    last_seen: str
+    tags: List[str]
+    created_at: str
+    updated_at: str
+    
+
+class MemoriesListResponse(BaseModel):
+    memories: List[MemoryResponse]
     total_count: int
 
 # Database connection
@@ -205,6 +223,157 @@ async def get_proposition(proposition_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/memories", response_model=MemoriesListResponse)
+async def get_memories(
+    limit: int = 50,
+    offset: int = 0,
+    category: Optional[str] = None
+):
+    """Get long-term memories from GUM database"""
+    if not Session:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    # Validate category parameter
+    valid_categories = ["workflow", "preference", "habit"]
+    if category and category not in valid_categories:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+        )
+    
+    try:
+        async with Session() as session:
+            # Build query
+            query = select(LongTermMemory)
+            
+            if category:
+                query = query.where(LongTermMemory.category == category)
+            
+            # Get total count
+            count_query = select(func.count(LongTermMemory.id))
+            if category:
+                count_query = count_query.where(LongTermMemory.category == category)
+            total_count_result = await session.execute(count_query)
+            total_count = total_count_result.scalar()
+            
+            # Get memories with pagination
+            memories_result = await session.execute(
+                query.order_by(LongTermMemory.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            
+            # Convert to response format
+            memory_responses = []
+            for memory in memories_result.scalars():
+                memory_responses.append(MemoryResponse(
+                    id=memory.id,
+                    category=memory.category,
+                    generalization=memory.generalization,
+                    supporting_prop_ids=memory.supporting_proposition_ids,  # Uses property
+                    rationale=memory.rationale,
+                    first_seen=memory.first_seen.isoformat() if memory.first_seen else "",
+                    last_seen=memory.last_seen.isoformat() if memory.last_seen else "",
+                    tags=memory.tag_list,  # Uses property
+                    created_at=memory.created_at.isoformat() if memory.created_at else "",
+                    updated_at=memory.updated_at.isoformat() if memory.updated_at else ""
+                ))
+            
+            return MemoriesListResponse(
+                memories=memory_responses,
+                total_count=total_count
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/api/memories/{memory_id}")
+async def get_memory(memory_id: int):
+    """Get a specific memory by ID"""
+    if not Session:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    try:
+        async with Session() as session:
+            memory = await session.get(LongTermMemory, memory_id)
+            if not memory:
+                raise HTTPException(status_code=404, detail="Memory not found")
+            
+            return MemoryResponse(
+                id=memory.id,
+                category=memory.category,
+                generalization=memory.generalization,
+                supporting_prop_ids=memory.supporting_proposition_ids,
+                rationale=memory.rationale,
+                first_seen=memory.first_seen.isoformat() if memory.first_seen else "",
+                last_seen=memory.last_seen.isoformat() if memory.last_seen else "",
+                tags=memory.tag_list,
+                created_at=memory.created_at.isoformat() if memory.created_at else "",
+                updated_at=memory.updated_at.isoformat() if memory.updated_at else ""
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.post("/api/memories/generate")
+async def generate_memory_manually():
+    """Manually trigger memory generation for testing purposes"""
+    if not Session:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    try:
+        # Import here to avoid circular imports
+        from gum.gum import gum
+        from gum.memory_service import LongTermMemoryService, MemoryServiceConfig
+        from openai import AsyncOpenAI
+        import os
+        
+        # Create temporary gum instance for manual memory generation
+        client = AsyncOpenAI(
+            api_key=os.getenv("GUM_LM_API_KEY") or os.getenv("OPENAI_API_KEY") or "None"
+        )
+        
+        memory_config = MemoryServiceConfig(model="gpt-4", temperature=0.1)
+        memory_service = LongTermMemoryService(
+            openai_client=client,
+            config=memory_config
+        )
+        
+        async with Session() as session:
+            memories = await memory_service.generate_long_term_memory(
+                user_id="manual_trigger",
+                session=session,
+                force_generation=True
+            )
+            
+            if memories:
+                return {
+                    "status": "success",
+                    "message": f"Generated {len(memories)} memories",
+                    "memories": [
+                        {
+                            "id": mem.id,
+                            "category": mem.category,
+                            "generalization": mem.generalization[:100] + "..." if len(mem.generalization) > 100 else mem.generalization
+                        } for mem in memories
+                    ]
+                }
+            else:
+                return {
+                    "status": "no_memories",
+                    "message": "No memories were generated (insufficient propositions or other constraints)"
+                }
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Memory generation failed: {str(e)}")
+
 
 @app.get("/api/health")
 async def health_check():

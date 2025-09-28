@@ -48,8 +48,48 @@ class PropositionsListResponse(BaseModel):
     propositions: List[PropositionResponse]
     total_count: int
 
+# ─────────────────────────── Memories API models
+class MemoryResponse(BaseModel):
+    id: int
+    category: str
+    generalization: str
+    supporting_prop_ids: List[int]
+    rationale: str
+    first_seen: str
+    last_seen: str
+    tags: List[str]
+    created_at: str
+    updated_at: str
+
+class MemoriesListResponse(BaseModel):
+    memories: List[MemoryResponse]
+    total_count: int
+
 # Database path
 db_path = os.path.expanduser("~/.cache/gum/gum.db")
+
+async def _ensure_long_term_memories_table(db: aiosqlite.Connection) -> None:
+    """Create the long_term_memories table if it doesn't exist (idempotent)."""
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS long_term_memories (
+            id INTEGER PRIMARY KEY,
+            category TEXT NOT NULL,
+            generalization TEXT NOT NULL,
+            supporting_prop_ids TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            first_seen TEXT,
+            last_seen TEXT,
+            tags TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    # Lightweight indexes for filtering/sorting
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_ltm_category ON long_term_memories(category)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_ltm_created_at ON long_term_memories(created_at)")
+    await db.commit()
 
 def calculate_mixed_initiative_score(proposition_data: dict) -> Dict[str, Any]:
     """Calculate mixed-initiative score for a proposition"""
@@ -160,6 +200,150 @@ async def get_propositions(
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# ─────────────────────────── Memories API
+@app.get("/api/memories", response_model=MemoriesListResponse)
+async def get_memories(
+    limit: int = 50,
+    offset: int = 0,
+    category: Optional[str] = None
+):
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=500, detail="GUM database not found. Please run GUM first.")
+
+    valid_categories = {"workflow", "preference", "habit"}
+    if category and category not in valid_categories:
+        raise HTTPException(status_code=400, detail="Invalid category. Use workflow|preference|habit")
+
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            await _ensure_long_term_memories_table(db)
+            where_clause = ""
+            params: List[Any] = []
+            if category:
+                where_clause = "WHERE category = ?"
+                params.append(category)
+
+            # Count
+            count_q = f"SELECT COUNT(*) FROM long_term_memories {where_clause}"
+            async with db.execute(count_q, params) as cur:
+                total_count = (await cur.fetchone())[0]
+
+            # Fetch
+            q = f"""
+                SELECT id, category, generalization, supporting_prop_ids, rationale,
+                       first_seen, last_seen, tags, created_at, updated_at
+                FROM long_term_memories
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """
+            query_params = params + [limit, offset]
+            async with db.execute(q, query_params) as cur:
+                rows = await cur.fetchall()
+
+            def parse_json_array(s: Optional[str]) -> List[Any]:
+                try:
+                    return json.loads(s) if s else []
+                except Exception:
+                    return []
+
+            memories: List[MemoryResponse] = []
+            for r in rows:
+                memories.append(MemoryResponse(
+                    id=r[0],
+                    category=r[1],
+                    generalization=r[2],
+                    supporting_prop_ids=[int(x) for x in parse_json_array(r[3]) if isinstance(x, (int, str)) and str(x).isdigit()],
+                    rationale=r[4],
+                    first_seen=str(r[5]) if r[5] is not None else "",
+                    last_seen=str(r[6]) if r[6] is not None else "",
+                    tags=[str(x) for x in parse_json_array(r[7])],
+                    created_at=str(r[8]) if r[8] is not None else "",
+                    updated_at=str(r[9]) if r[9] is not None else ""
+                ))
+
+            return MemoriesListResponse(memories=memories, total_count=total_count)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/api/memories/{memory_id}", response_model=MemoryResponse)
+async def get_memory(memory_id: int):
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=500, detail="GUM database not found. Please run GUM first.")
+
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            await _ensure_long_term_memories_table(db)
+            q = (
+                "SELECT id, category, generalization, supporting_prop_ids, rationale, "
+                "first_seen, last_seen, tags, created_at, updated_at "
+                "FROM long_term_memories WHERE id = ?"
+            )
+            async with db.execute(q, (memory_id,)) as cur:
+                row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Memory not found")
+
+            def parse_json_array(s: Optional[str]) -> List[Any]:
+                try:
+                    return json.loads(s) if s else []
+                except Exception:
+                    return []
+
+            return MemoryResponse(
+                id=row[0],
+                category=row[1],
+                generalization=row[2],
+                supporting_prop_ids=[int(x) for x in parse_json_array(row[3]) if isinstance(x, (int, str)) and str(x).isdigit()],
+                rationale=row[4],
+                first_seen=str(row[5]) if row[5] is not None else "",
+                last_seen=str(row[6]) if row[6] is not None else "",
+                tags=[str(x) for x in parse_json_array(row[7])],
+                created_at=str(row[8]) if row[8] is not None else "",
+                updated_at=str(row[9]) if row[9] is not None else "",
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.post("/api/memories/generate")
+async def generate_memory_manually():
+    """Manually trigger memory generation using the service and ORM session."""
+    try:
+        # Lazy imports to avoid heavier startup
+        from openai import AsyncOpenAI
+        from gum.memory_service import LongTermMemoryService, MemoryServiceConfig
+        from gum.models import init_db
+
+        client = AsyncOpenAI(
+            api_key=os.getenv("GUM_LM_API_KEY") or os.getenv("OPENAI_API_KEY") or "None"
+        )
+        memory_service = LongTermMemoryService(
+            openai_client=client,
+            config=MemoryServiceConfig(model=os.getenv("GUM_LM_MODEL", "gpt-4"), temperature=0.1)
+        )
+
+        # Create ORM session and run generation
+        engine, Session = await init_db()
+        async with Session() as session:
+            memories = await memory_service.generate_long_term_memory(
+                user_id="manual_trigger",
+                session=session,
+                force_generation=True
+            )
+
+        return {
+            "status": "success",
+            "generated": len(memories or []),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @app.get("/api/health")
 async def health_check():

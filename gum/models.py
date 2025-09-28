@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pathlib
-from typing import Optional
+from typing import Optional, List
+import json
 
 from sqlalchemy import (
     Column,
@@ -166,6 +167,81 @@ class Proposition(Base):
         """
         preview = (self.text[:27] + "…") if len(self.text) > 30 else self.text
         return f"<Proposition(id={self.id}, text={preview})>"
+
+
+class LongTermMemory(Base):
+    """Represents a long-term memory generated from propositions.
+    
+    This model stores generalized insights about user behavior derived from
+    clustering and analyzing multiple propositions over time.
+
+    Attributes:
+        id (int): Primary key for the memory.
+        category (str): Category of memory (workflow|preference|habit).
+        generalization (str): 1-2 sentence summary of the pattern.
+        supporting_prop_ids (str): JSON array of proposition IDs that support this memory.
+        rationale (str): Explanation of why the propositions support this generalization.
+        first_seen (datetime): Timestamp of the earliest supporting proposition.
+        last_seen (datetime): Timestamp of the latest supporting proposition.
+        tags (str): JSON array of tags for categorization.
+        created_at (datetime): When the memory was created.
+        updated_at (datetime): When the memory was last updated.
+    """
+    __tablename__ = "long_term_memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    generalization: Mapped[str] = mapped_column(Text, nullable=False)
+    supporting_prop_ids: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    first_seen: Mapped[str] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen: Mapped[str] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    tags: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
+    
+    created_at: Mapped[str] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[str] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    @property
+    def supporting_proposition_ids(self) -> List[int]:
+        """Parse supporting proposition IDs from JSON string."""
+        try:
+            return json.loads(self.supporting_prop_ids)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @supporting_proposition_ids.setter
+    def supporting_proposition_ids(self, value: List[int]) -> None:
+        """Set supporting proposition IDs as JSON string."""
+        self.supporting_prop_ids = json.dumps(value)
+
+    @property
+    def tag_list(self) -> List[str]:
+        """Parse tags from JSON string."""
+        try:
+            return json.loads(self.tags)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @tag_list.setter
+    def tag_list(self, value: List[str]) -> None:
+        """Set tags as JSON string."""
+        self.tags = json.dumps(value)
+
+    def __repr__(self) -> str:
+        """String representation of the long-term memory.
+        
+        Returns:
+            str: A string representation showing the memory ID, category, and preview.
+        """
+        preview = (self.generalization[:50] + "…") if len(self.generalization) > 53 else self.generalization
+        return f"<LongTermMemory(id={self.id}, category={self.category}, text={preview})>"
 
 
 FTS_TOKENIZER = "porter ascii"

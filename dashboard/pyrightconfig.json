@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/pyrightconfig.json",
+  "venvPath": "..",
+  "venv": "venv",
+  "reportMissingImports": true,
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.13",
+  "exclude": [
+    "node_modules",
+    "**/__pycache__"
+  ]
+}
+
+
