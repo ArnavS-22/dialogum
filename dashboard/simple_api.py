@@ -312,6 +312,69 @@ async def get_memory(memory_id: int):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@app.get("/api/memories/{memory_id}/propositions")
+async def get_memory_propositions(memory_id: int):
+    """Get the supporting propositions for a specific memory."""
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=500, detail="GUM database not found. Please run GUM first.")
+
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            # First, get the memory to verify it exists and get supporting prop IDs
+            memory_query = "SELECT supporting_prop_ids FROM long_term_memories WHERE id = ?"
+            async with db.execute(memory_query, (memory_id,)) as cur:
+                memory_row = await cur.fetchone()
+            
+            if not memory_row:
+                raise HTTPException(status_code=404, detail="Memory not found")
+            
+            # Parse the supporting proposition IDs
+            supporting_prop_ids = json.loads(memory_row[0]) if memory_row[0] else []
+            if not supporting_prop_ids:
+                return {"propositions": []}
+            
+            # Convert to integers and create placeholders for the query
+            prop_ids = [int(pid) for pid in supporting_prop_ids if str(pid).isdigit()]
+            if not prop_ids:
+                return {"propositions": []}
+            
+            # Fetch the actual propositions
+            placeholders = ",".join("?" * len(prop_ids))
+            propositions_query = f"""
+                SELECT id, text, reasoning, confidence, decay, created_at, updated_at, 
+                       revision_group, version
+                FROM propositions 
+                WHERE id IN ({placeholders})
+                ORDER BY created_at DESC
+            """
+            
+            async with db.execute(propositions_query, prop_ids) as cur:
+                rows = await cur.fetchall()
+            
+            propositions = []
+            for row in rows:
+                propositions.append(PropositionResponse(
+                    id=row[0],
+                    text=row[1],
+                    reasoning=row[2],
+                    confidence=row[3],
+                    decay=row[4],
+                    created_at=row[5],
+                    updated_at=row[6],
+                    revision_group=row[7],
+                    version=row[8],
+                    observation_count=0,  # Not available in current schema
+                    mixed_initiative_score=None  # Not available in current schema
+                ))
+            
+            return {"propositions": propositions}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
 @app.post("/api/memories/generate")
 async def generate_memory_manually():
     """Manually trigger memory generation using the service and ORM session."""

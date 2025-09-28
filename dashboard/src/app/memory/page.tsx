@@ -18,6 +18,20 @@ interface Memory {
   updated_at: string;
 }
 
+interface Proposition {
+  id: number;
+  text: string;
+  reasoning: string;
+  confidence: number | null;
+  decay: number | null;
+  created_at: string;
+  updated_at: string;
+  revision_group: string;
+  version: number;
+  observation_count: number;
+  mixed_initiative_score: any | null;
+}
+
 interface MemoriesResponse {
   memories: Memory[];
   total_count: number;
@@ -30,6 +44,8 @@ export default function MemoryPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [expandedMemory, setExpandedMemory] = useState<number | null>(null);
+  const [supportingPropositions, setSupportingPropositions] = useState<Map<number, Proposition[]>>(new Map());
+  const [loadingPropositions, setLoadingPropositions] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     fetchMemories();
@@ -59,6 +75,47 @@ export default function MemoryPage() {
       setError(err instanceof Error ? err.message : 'Failed to fetch memories');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSupportingPropositions = async (memoryId: number) => {
+    const id = Number(memoryId);
+    // Don't fetch if already loaded or currently loading
+    if (supportingPropositions.has(id) || loadingPropositions.has(id)) {
+      return;
+    }
+
+    try {
+      setLoadingPropositions(prev => new Set(prev).add(id));
+      
+      const response = await fetch(`http://localhost:8000/api/memories/${id}/propositions`, {
+        cache: 'no-store',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setSupportingPropositions(prev => new Map(prev).set(id, data.propositions));
+    } catch (err) {
+      console.error(`Failed to fetch propositions for memory ${id}:`, err);
+    } finally {
+      setLoadingPropositions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
+  };
+
+  const handleMemoryExpand = (memoryId: number) => {
+    const id = Number(memoryId);
+    if (expandedMemory === id) {
+      setExpandedMemory(null);
+    } else {
+      setExpandedMemory(id);
+      fetchSupportingPropositions(id);
     }
   };
 
@@ -242,10 +299,10 @@ export default function MemoryPage() {
                 </div>
               </div>
               <button
-                onClick={() => setExpandedMemory(expandedMemory === memory.id ? null : memory.id)}
+                onClick={() => handleMemoryExpand(memory.id)}
                 className="text-gray-400 hover:text-white transition-colors"
               >
-                {expandedMemory === memory.id ? "🔼" : "🔽"}
+                {expandedMemory === Number(memory.id) ? "🔼" : "🔽"}
               </button>
             </div>
 
@@ -269,19 +326,52 @@ export default function MemoryPage() {
             </div>
 
             {/* Expanded Details */}
-            {expandedMemory === memory.id && (
+            {expandedMemory === Number(memory.id) && (
               <div className="border-t border-white/20 pt-4 mt-4">
                 <h4 className="text-sm font-medium text-white mb-2">Rationale:</h4>
                 <p className="text-gray-300 text-sm mb-4">{memory.rationale}</p>
                 
+                {/* Supporting Propositions */}
+                <div className="mb-4">
+                  <h4 className="text-sm font-medium text-white mb-2">
+                    Supporting Propositions ({memory.supporting_prop_ids.length}):
+                  </h4>
+                  
+                  {loadingPropositions.has(Number(memory.id)) ? (
+                    <div className="text-gray-400 text-sm">Loading propositions...</div>
+                  ) : supportingPropositions.has(Number(memory.id)) ? (
+                    <div className="space-y-3">
+                      {supportingPropositions.get(Number(memory.id))?.map((prop) => (
+                        <div key={prop.id} className="bg-white/5 rounded-lg p-3 border border-white/10">
+                          <div className="flex items-start justify-between mb-2">
+                            <span className="text-xs text-gray-400">Proposition #{prop.id}</span>
+                            <span className="text-xs text-gray-400">
+                              {formatDate(prop.created_at)}
+                            </span>
+                          </div>
+                          <p className="text-gray-200 text-sm mb-2">{prop.text}</p>
+                          <p className="text-gray-400 text-xs">{prop.reasoning}</p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                            <span>Confidence: {prop.confidence || 'N/A'}</span>
+                            <span>Decay: {prop.decay || 'N/A'}</span>
+                            <span>Version: {prop.version}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-sm">No propositions found</div>
+                  )}
+                </div>
+                
                 <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <span className="text-gray-400">Supporting Propositions:</span>
-                    <div className="text-white">{memory.supporting_prop_ids.join(", ")}</div>
-                  </div>
                   <div>
                     <span className="text-gray-400">Created:</span>
                     <div className="text-white">{formatDate(memory.created_at)}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Last Updated:</span>
+                    <div className="text-white">{formatDate(memory.updated_at)}</div>
                   </div>
                 </div>
               </div>
