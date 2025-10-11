@@ -7,7 +7,7 @@ Total Propositions: 789
 119	Dhruv Yadati actively utilizes GitHub for version control, managing multiple projects including 'dialogum', 'gumorebuild', and 'trialmemory'.
 123	Arnav Sharma experiences distractions during video viewing sessions, which impacts his focus as noted from activity with Dailymotion.
 133	Arnav Sharma demonstrates strong API key management practices, ensuring proper setup and export of API keys in his project.
-140	Dhruv Yadati's work environment indicates a balance between productivity and a natural setting.
+140	Dhruv Yadati's work environment indicates a balance between productiavity and a natural setting.
 144	Dhruv Yadati is documenting the memory service behavior through a README.md file, meticulously detailing its operational parameters and configurations, reflecting his thorough approach to project documentation.
 149	Arnav Sharma prioritizes strong configurations and setup procedures in his development process, as evident from the multiple configuration files present in his project.
 156	Dhruv Yadati is focusing on user attention and engagement features as part of his application design for the memory services app.

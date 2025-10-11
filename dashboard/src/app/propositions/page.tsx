@@ -3,14 +3,6 @@
 import { useState, useEffect } from "react";
 import { LiquidButton, MetalButton } from "@/components/ui/liquid-glass-button";
 
-interface MixedInitiativeScore {
-  decision: string;
-  expected_utility: number;
-  confidence_normalized: number;
-  attention_level: number;
-  interruption_cost: number;
-}
-
 interface Proposition {
   id: number;
   text: string;
@@ -22,7 +14,13 @@ interface Proposition {
   revision_group: string;
   version: number;
   observation_count: number;
-  mixed_initiative_score: MixedInitiativeScore | null;
+  // Ambiguity/Urgency
+  entropy_score?: number | null;
+  is_ambiguous?: boolean | null;
+  urgency_level?: string | null;
+  urgency_score?: number | null;
+  time_sensitive?: boolean | null;
+  should_clarify_by?: string | null;
 }
 
 interface PropositionsResponse {
@@ -59,29 +57,16 @@ export default function PropositionsPage() {
     }
   };
 
-  const getDecisionColor = (decision: string) => {
-    switch (decision) {
-      case 'autonomous_action':
-        return 'text-green-400';
-      case 'dialogue':
+  const getUrgencyColor = (level?: string | null) => {
+    switch (level) {
+      case 'URGENT':
+        return 'text-red-400';
+      case 'SOON':
         return 'text-yellow-400';
-      case 'no_action':
+      case 'LATER':
         return 'text-gray-400';
       default:
         return 'text-white';
-    }
-  };
-
-  const getDecisionIcon = (decision: string) => {
-    switch (decision) {
-      case 'autonomous_action':
-        return '🤖';
-      case 'dialogue':
-        return '💬';
-      case 'no_action':
-        return '⏸️';
-      default:
-        return '❓';
     }
   };
 
@@ -140,16 +125,16 @@ export default function PropositionsPage() {
             <div className="text-sm text-gray-300">Total Propositions</div>
           </div>
           <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
-            <div className="text-2xl font-bold text-green-400">
-              {propositions.filter(p => p.mixed_initiative_score?.decision === 'autonomous_action').length}
+            <div className="text-2xl font-bold text-red-400">
+              {propositions.filter(p => p.urgency_level === 'URGENT').length}
             </div>
-            <div className="text-sm text-gray-300">Autonomous Actions</div>
+            <div className="text-sm text-gray-300">Urgent Clarifications</div>
           </div>
           <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <div className="text-2xl font-bold text-yellow-400">
-              {propositions.filter(p => p.mixed_initiative_score?.decision === 'dialogue').length}
+              {propositions.filter(p => p.is_ambiguous).length}
             </div>
-            <div className="text-sm text-gray-300">Dialogue Triggers</div>
+            <div className="text-sm text-gray-300">Ambiguous</div>
           </div>
           <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <div className="text-2xl font-bold text-blue-400">
@@ -190,32 +175,48 @@ export default function PropositionsPage() {
                 </p>
               </div>
 
-              {/* Mixed-Initiative Score */}
-              {proposition.mixed_initiative_score && (
+              {/* Ambiguity & Urgency */}
+              {(proposition.entropy_score != null || proposition.urgency_level) && (
                 <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-white">Mixed-Initiative Decision</span>
-                    <span className={`text-lg ${getDecisionColor(proposition.mixed_initiative_score.decision)}`}>
-                      {getDecisionIcon(proposition.mixed_initiative_score.decision)} {proposition.mixed_initiative_score.decision}
-                    </span>
+                    <span className="text-sm font-medium text-white">Ambiguity & Urgency</span>
+                    {proposition.urgency_level && (
+                      <span className={`text-lg ${getUrgencyColor(proposition.urgency_level)}`}>
+                        {proposition.urgency_level}
+                      </span>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-gray-400">EU:</span>
-                      <span className="text-white ml-1">{proposition.mixed_initiative_score.expected_utility}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Attention:</span>
-                      <span className="text-white ml-1">{proposition.mixed_initiative_score.attention_level}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Confidence:</span>
-                      <span className="text-white ml-1">{proposition.mixed_initiative_score.confidence_normalized}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Interruption:</span>
-                      <span className="text-white ml-1">{proposition.mixed_initiative_score.interruption_cost}</span>
-                    </div>
+                    {proposition.entropy_score != null && (
+                      <div>
+                        <span className="text-gray-400">Entropy:</span>
+                        <span className="text-white ml-1">{proposition.entropy_score?.toFixed?.(2) ?? proposition.entropy_score}</span>
+                      </div>
+                    )}
+                    {proposition.is_ambiguous != null && (
+                      <div>
+                        <span className="text-gray-400">Ambiguous:</span>
+                        <span className="text-white ml-1">{proposition.is_ambiguous ? 'Yes' : 'No'}</span>
+                      </div>
+                    )}
+                    {proposition.urgency_score != null && (
+                      <div>
+                        <span className="text-gray-400">Urgency score:</span>
+                        <span className="text-white ml-1">{proposition.urgency_score?.toFixed?.(2) ?? proposition.urgency_score}</span>
+                      </div>
+                    )}
+                    {proposition.time_sensitive != null && (
+                      <div>
+                        <span className="text-gray-400">Time sensitive:</span>
+                        <span className="text-white ml-1">{proposition.time_sensitive ? 'Yes' : 'No'}</span>
+                      </div>
+                    )}
+                    {proposition.should_clarify_by && (
+                      <div>
+                        <span className="text-gray-400">Clarify by:</span>
+                        <span className="text-white ml-1">{new Date(proposition.should_clarify_by).toLocaleString()}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

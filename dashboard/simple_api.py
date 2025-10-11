@@ -42,7 +42,14 @@ class PropositionResponse(BaseModel):
     revision_group: str
     version: int
     observation_count: int
-    mixed_initiative_score: Optional[Dict[str, Any]] = None
+    # Ambiguity
+    entropy_score: Optional[float] = None
+    is_ambiguous: Optional[bool] = None
+    # Urgency
+    urgency_level: Optional[str] = None
+    urgency_score: Optional[float] = None
+    time_sensitive: Optional[bool] = None
+    should_clarify_by: Optional[str] = None
 
 class PropositionsListResponse(BaseModel):
     propositions: List[PropositionResponse]
@@ -51,32 +58,8 @@ class PropositionsListResponse(BaseModel):
 # Database path
 db_path = os.path.expanduser("~/.cache/gum/gum.db")
 
-def calculate_mixed_initiative_score(proposition_data: dict) -> Dict[str, Any]:
-    """Calculate mixed-initiative score for a proposition"""
-    confidence = proposition_data.get('confidence', 5)
-    confidence_normalized = confidence / 10.0
-    
-    # Mock attention level (would come from attention monitor)
-    attention_level = 0.07  # Mock low attention
-    
-    # Mock decision calculation
-    if confidence_normalized > 0.8:
-        decision = "autonomous_action"
-        expected_utility = 0.8 + (attention_level * 0.2)
-    elif confidence_normalized > 0.5:
-        decision = "dialogue"
-        expected_utility = 0.5 + (attention_level * 0.3)
-    else:
-        decision = "no_action"
-        expected_utility = 0.2
-    
-    return {
-        "decision": decision,
-        "expected_utility": round(expected_utility, 3),
-        "confidence_normalized": round(confidence_normalized, 3),
-        "attention_level": attention_level,
-        "interruption_cost": round(-attention_level * 2, 3)
-    }
+def _noop():
+    return None
 
 @app.get("/api/propositions", response_model=PropositionsListResponse)
 async def get_propositions(
@@ -135,9 +118,47 @@ async def get_propositions(
                 obs_query = "SELECT COUNT(*) FROM observation_proposition WHERE proposition_id = ?"
                 async with db.execute(obs_query, (row[0],)) as obs_cursor:
                     observation_count = (await obs_cursor.fetchone())[0]
-                
-                # Calculate mixed-initiative score
-                mixed_initiative_score = calculate_mixed_initiative_score(prop_data)
+
+                # Load latest ambiguity analysis (if any)
+                entropy_score = None
+                is_ambiguous = None
+                async with db.execute(
+                    """
+                    SELECT entropy_score, is_ambiguous
+                    FROM ambiguity_analyses
+                    WHERE proposition_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (row[0],)
+                ) as aa_cur:
+                    aa_row = await aa_cur.fetchone()
+                    if aa_row:
+                        entropy_score, is_ambiguous = aa_row[0], bool(aa_row[1])
+
+                # Load urgency assessment (if any)
+                urgency_level = None
+                urgency_score = None
+                time_sensitive = None
+                should_clarify_by = None
+                async with db.execute(
+                    """
+                    SELECT urgency_level, urgency_score, time_sensitive, should_clarify_by
+                    FROM urgency_assessments
+                    WHERE proposition_id = ?
+                    LIMIT 1
+                    """,
+                    (row[0],)
+                ) as ua_cur:
+                    ua_row = await ua_cur.fetchone()
+                    if ua_row:
+                        urgency_level = ua_row[0]
+                        urgency_score = ua_row[1]
+                        time_sensitive = bool(ua_row[2]) if ua_row[2] is not None else None
+                        should_clarify_by = (
+                            ua_row[3] if isinstance(ua_row[3], str) else 
+                            (ua_row[3].isoformat() if ua_row[3] else None)
+                        )
                 
                 proposition_responses.append(PropositionResponse(
                     id=prop_data['id'],
@@ -150,7 +171,12 @@ async def get_propositions(
                     revision_group=prop_data['revision_group'],
                     version=prop_data['version'],
                     observation_count=observation_count,
-                    mixed_initiative_score=mixed_initiative_score
+                    entropy_score=entropy_score,
+                    is_ambiguous=is_ambiguous,
+                    urgency_level=urgency_level,
+                    urgency_score=urgency_score,
+                    time_sensitive=time_sensitive,
+                    should_clarify_by=should_clarify_by,
                 ))
             
             return PropositionsListResponse(

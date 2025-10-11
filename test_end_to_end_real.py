@@ -12,7 +12,8 @@ import time
 from unittest.mock import patch, MagicMock
 
 from gum.models import Proposition
-from gum.decision import MixedInitiativeDecisionEngine, DecisionContext  
+import pytest
+pytest.skip("Mixed-initiative engine removed", allow_module_level=True)
 from gum.attention import AttentionMonitor
 from gum.config import GumConfig
 

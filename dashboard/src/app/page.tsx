@@ -4,14 +4,6 @@ import { useState, useEffect } from "react";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { BorderTrail } from "@/components/ui/border-trail";
 
-interface MixedInitiativeScore {
-  decision: string;
-  expected_utility: number;
-  confidence_normalized: number;
-  attention_level: number;
-  interruption_cost: number;
-}
-
 interface Proposition {
   id: number;
   text: string;
@@ -23,7 +15,13 @@ interface Proposition {
   revision_group: string;
   version: number;
   observation_count: number;
-  mixed_initiative_score: MixedInitiativeScore | null;
+  // Ambiguity/Urgency
+  entropy_score?: number | null;
+  is_ambiguous?: boolean | null;
+  urgency_level?: string | null;
+  urgency_score?: number | null;
+  time_sensitive?: boolean | null;
+  should_clarify_by?: string | null;
 }
 
 interface PropositionsResponse {
@@ -88,29 +86,16 @@ export default function PropositionsPage() {
     }
   };
 
-  const getDecisionColor = (decision: string) => {
-    switch (decision) {
-      case 'autonomous_action':
-        return 'text-green-400';
-      case 'dialogue':
+  const getUrgencyColor = (level?: string | null) => {
+    switch (level) {
+      case 'URGENT':
+        return 'text-red-400';
+      case 'SOON':
         return 'text-yellow-400';
-      case 'no_action':
+      case 'LATER':
         return 'text-gray-400';
       default:
         return 'text-white';
-    }
-  };
-
-  const getDecisionIcon = (decision: string) => {
-    switch (decision) {
-      case 'autonomous_action':
-        return '🤖';
-      case 'dialogue':
-        return '💬';
-      case 'no_action':
-        return '⏸️';
-      default:
-        return '❓';
     }
   };
 
@@ -158,7 +143,7 @@ export default function PropositionsPage() {
             GUM Propositions
           </h1>
           <p className="text-gray-300">
-            {totalCount} propositions • Mixed-initiative decisions
+            {totalCount} propositions • Ambiguity and urgency overview
           </p>
         </div>
 
@@ -171,17 +156,17 @@ export default function PropositionsPage() {
           </div>
           <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <BorderTrail size={40} />
-            <div className="text-2xl font-bold text-green-400">
-              {propositions.filter(p => p.mixed_initiative_score?.decision === 'autonomous_action').length}
+            <div className="text-2xl font-bold text-red-400">
+              {propositions.filter(p => p.urgency_level === 'URGENT').length}
             </div>
-            <div className="text-sm text-gray-300">Auto</div>
+            <div className="text-sm text-gray-300">Urgent</div>
           </div>
           <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <BorderTrail size={40} />
             <div className="text-2xl font-bold text-yellow-400">
-              {propositions.filter(p => p.mixed_initiative_score?.decision === 'dialogue').length}
+              {propositions.filter(p => p.is_ambiguous).length}
             </div>
-            <div className="text-sm text-gray-300">Dialogue</div>
+            <div className="text-sm text-gray-300">Ambiguous</div>
           </div>
           <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <BorderTrail size={40} />
@@ -211,15 +196,15 @@ export default function PropositionsPage() {
                 </div>
               </div>
 
-              {proposition.mixed_initiative_score && (
+              {(proposition.entropy_score != null || proposition.urgency_level) && (
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <span className={`text-lg ${getDecisionColor(proposition.mixed_initiative_score.decision)}`}>
-                      {getDecisionIcon(proposition.mixed_initiative_score.decision)} {proposition.mixed_initiative_score.decision}
-                    </span>
-                    <span className="text-sm text-gray-300">
-                      EU: {proposition.mixed_initiative_score.expected_utility}
-                    </span>
+                    {proposition.entropy_score != null && (
+                      <span className="text-sm text-gray-300">Entropy: {proposition.entropy_score?.toFixed?.(2) ?? proposition.entropy_score}</span>
+                    )}
+                    {proposition.urgency_level && (
+                      <span className={`text-sm ${getUrgencyColor(proposition.urgency_level)}`}>{proposition.urgency_level}</span>
+                    )}
                     <span className="text-sm text-gray-300">
                       {proposition.observation_count} obs
                     </span>

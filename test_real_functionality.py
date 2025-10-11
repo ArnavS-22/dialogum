@@ -20,8 +20,9 @@ import statistics
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 
-from gum.decision import MixedInitiativeDecisionEngine, DecisionContext
-from gum.attention import AttentionMonitor, AttentionState
+# Mixed-initiative engine removed; skip tests using it
+import pytest
+pytest.skip("Mixed-initiative engine removed", allow_module_level=True)
 from gum.models import Proposition
 from gum.config import GumConfig
 

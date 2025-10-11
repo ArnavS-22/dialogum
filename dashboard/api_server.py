@@ -26,6 +26,7 @@ from sqlalchemy.orm import sessionmaker
 
 # Import GUM models
 from gum.models import Proposition, Observation, init_db
+from gum.ambiguity_models import AmbiguityAnalysis, UrgencyAssessment
 
 app = FastAPI(title="GUM Dashboard API")
 
@@ -51,7 +52,14 @@ class PropositionResponse(BaseModel):
     revision_group: str
     version: int
     observation_count: int
-    mixed_initiative_score: Optional[Dict[str, Any]] = None
+    # Ambiguity
+    entropy_score: Optional[float] = None
+    is_ambiguous: Optional[bool] = None
+    # Urgency
+    urgency_level: Optional[str] = None
+    urgency_score: Optional[float] = None
+    time_sensitive: Optional[bool] = None
+    should_clarify_by: Optional[str] = None
 
 class PropositionsListResponse(BaseModel):
     propositions: List[PropositionResponse]
@@ -119,8 +127,41 @@ async def get_propositions(
             # Convert to response format
             proposition_responses = []
             for prop in propositions_result.scalars():
-                # Calculate mixed-initiative score (mock for now)
-                mixed_initiative_score = calculate_mixed_initiative_score(prop)
+                # Load latest ambiguity analysis (if any)
+                ambiguity_score = None
+                ambiguity_flag = None
+                try:
+                    aa_q = (
+                        select(AmbiguityAnalysis)
+                        .where(AmbiguityAnalysis.proposition_id == prop.id)
+                        .order_by(AmbiguityAnalysis.id.desc())
+                        .limit(1)
+                    )
+                    aa_res = await session.execute(aa_q)
+                    aa = aa_res.scalars().first()
+                    if aa:
+                        ambiguity_score = aa.entropy_score
+                        ambiguity_flag = aa.is_ambiguous
+                except Exception:
+                    ambiguity_score = None
+                    ambiguity_flag = None
+
+                # Load urgency assessment (if any)
+                urgency_level = None
+                urgency_score = None
+                time_sensitive = None
+                should_clarify_by = None
+                try:
+                    ua_q = select(UrgencyAssessment).where(UrgencyAssessment.proposition_id == prop.id).limit(1)
+                    ua_res = await session.execute(ua_q)
+                    ua = ua_res.scalars().first()
+                    if ua:
+                        urgency_level = ua.urgency_level
+                        urgency_score = ua.urgency_score
+                        time_sensitive = ua.time_sensitive
+                        should_clarify_by = ua.should_clarify_by.isoformat() if ua.should_clarify_by else None
+                except Exception:
+                    pass
                 
                 proposition_responses.append(PropositionResponse(
                     id=prop.id,
@@ -133,7 +174,12 @@ async def get_propositions(
                     revision_group=prop.revision_group,
                     version=prop.version,
                     observation_count=len(prop.observations) if prop.observations else 0,
-                    mixed_initiative_score=mixed_initiative_score
+                    entropy_score=ambiguity_score,
+                    is_ambiguous=ambiguity_flag,
+                    urgency_level=urgency_level,
+                    urgency_score=urgency_score,
+                    time_sensitive=time_sensitive,
+                    should_clarify_by=should_clarify_by,
                 ))
             
             return PropositionsListResponse(
@@ -144,34 +190,8 @@ async def get_propositions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-def calculate_mixed_initiative_score(proposition: Proposition) -> Dict[str, Any]:
-    """Calculate mixed-initiative score for a proposition"""
-    # Mock calculation - in real implementation, this would use the decision engine
-    
-    confidence = proposition.confidence or 5
-    confidence_normalized = confidence / 10.0
-    
-    # Mock attention level (would come from attention monitor)
-    attention_level = 0.07  # Mock low attention
-    
-    # Mock decision calculation
-    if confidence_normalized > 0.8:
-        decision = "autonomous_action"
-        expected_utility = 0.8 + (attention_level * 0.2)
-    elif confidence_normalized > 0.5:
-        decision = "dialogue"
-        expected_utility = 0.5 + (attention_level * 0.3)
-    else:
-        decision = "no_action"
-        expected_utility = 0.2
-    
-    return {
-        "decision": decision,
-        "expected_utility": round(expected_utility, 3),
-        "confidence_normalized": round(confidence_normalized, 3),
-        "attention_level": attention_level,
-        "interruption_cost": round(-attention_level * 2, 3)
-    }
+def _noop():
+    return None
 
 @app.get("/api/propositions/{proposition_id}")
 async def get_proposition(proposition_id: int):
@@ -184,9 +204,35 @@ async def get_proposition(proposition_id: int):
             proposition = await session.get(Proposition, proposition_id)
             if not proposition:
                 raise HTTPException(status_code=404, detail="Proposition not found")
-            
-            mixed_initiative_score = calculate_mixed_initiative_score(proposition)
-            
+
+            # Load ambiguity/urgency for single proposition
+            ambiguity_score = None
+            ambiguity_flag = None
+            aa_q = (
+                select(AmbiguityAnalysis)
+                .where(AmbiguityAnalysis.proposition_id == proposition.id)
+                .order_by(AmbiguityAnalysis.id.desc())
+                .limit(1)
+            )
+            aa_res = await session.execute(aa_q)
+            aa = aa_res.scalars().first()
+            if aa:
+                ambiguity_score = aa.entropy_score
+                ambiguity_flag = aa.is_ambiguous
+
+            urgency_level = None
+            urgency_score = None
+            time_sensitive = None
+            should_clarify_by = None
+            ua_q = select(UrgencyAssessment).where(UrgencyAssessment.proposition_id == proposition.id).limit(1)
+            ua_res = await session.execute(ua_q)
+            ua = ua_res.scalars().first()
+            if ua:
+                urgency_level = ua.urgency_level
+                urgency_score = ua.urgency_score
+                time_sensitive = ua.time_sensitive
+                should_clarify_by = ua.should_clarify_by.isoformat() if ua.should_clarify_by else None
+
             return PropositionResponse(
                 id=proposition.id,
                 text=proposition.text,
@@ -198,7 +244,12 @@ async def get_proposition(proposition_id: int):
                 revision_group=proposition.revision_group,
                 version=proposition.version,
                 observation_count=len(proposition.observations) if proposition.observations else 0,
-                mixed_initiative_score=mixed_initiative_score
+                entropy_score=ambiguity_score,
+                is_ambiguous=ambiguity_flag,
+                urgency_level=urgency_level,
+                urgency_score=urgency_score,
+                time_sensitive=time_sensitive,
+                should_clarify_by=should_clarify_by,
             )
             
     except HTTPException:
