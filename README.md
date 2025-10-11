@@ -1,35 +1,8 @@
-# GUM (General User Models)
+source venv/bin/activate && python -m gum.cli -u "Arnav Sharma" 
 
-[![arXiv](https://img.shields.io/badge/arXiv-2505.10831-b31b1b.svg)](https://arxiv.org/abs/2505.10831)
+/Users/arnavsharma/trialwmemory/venv/bin/python -m uvicorn dashboard.simple_api:app --host 0.0.0.0 --port 8000 
 
-General User Models learn about you by observing any interaction you have with your computer. The GUM takes as input any unstructured observation of a user (e.g., device screenshots) and constructs confidence-weighted propositions that capture the user's knowledge and preferences. GUMs introduce an architecture that infers new propositions about a user from multimodal observations, retrieves related propositions for context, and continuously revises existing propositions.
 
-## Documentation
+cd dashboard && npm run dev
 
-**Please go here for documentation on setting up and using GUMs: [https://generalusermodels.github.io/gum/](https://generalusermodels.github.io/gum/)**
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-MIT License
-
-## Citation and Paper
-
-If you're interested in reading more, please check out our paper!
-
-[Creating General User Models from Computer Use](https://arxiv.org/abs/2505.10831)
-
-```bibtex
-@misc{shaikh2025creatinggeneralusermodels,
-    title={Creating General User Models from Computer Use}, 
-    author={Omar Shaikh and Shardul Sapkota and Shan Rizvi and Eric Horvitz and Joon Sung Park and Diyi Yang and Michael S. Bernstein},
-    year={2025},
-    eprint={2505.10831},
-    archivePrefix={arXiv},
-    primaryClass={cs.HC},
-    url={https://arxiv.org/abs/2505.10831}, 
-}
-```
+is it actually hooked to our continious proposition data? will the workflows showup in the frontend? can you please as a test, repeat as a test, DO NOT HARDCODE THIS, fetch the latest proposito
