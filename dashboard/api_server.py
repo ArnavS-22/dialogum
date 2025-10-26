@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 
 # Import GUM models
 from gum.models import Proposition, Observation, init_db
-from gum.ambiguity_models import AmbiguityAnalysis, UrgencyAssessment
+from gum.clarification_models import ClarificationAnalysis
 
 app = FastAPI(title="GUM Dashboard API")
 
@@ -52,18 +52,25 @@ class PropositionResponse(BaseModel):
     revision_group: str
     version: int
     observation_count: int
-    # Ambiguity
-    entropy_score: Optional[float] = None
-    is_ambiguous: Optional[bool] = None
-    # Urgency
-    urgency_level: Optional[str] = None
-    urgency_score: Optional[float] = None
-    time_sensitive: Optional[bool] = None
-    should_clarify_by: Optional[str] = None
 
 class PropositionsListResponse(BaseModel):
     propositions: List[PropositionResponse]
     total_count: int
+
+class ClarificationAnalysisResponse(BaseModel):
+    has_analysis: bool
+    needs_clarification: Optional[bool] = None
+    clarification_score: Optional[float] = None
+    triggered_factors: Optional[List[str]] = None
+    reasoning: Optional[str] = None
+    factor_scores: Optional[Dict[str, float]] = None
+    created_at: Optional[str] = None
+
+class FlaggedPropositionResponse(BaseModel):
+    proposition: PropositionResponse
+    clarification_score: float
+    triggered_factors: List[str]
+    reasoning: str
 
 # Database connection
 db_path = os.path.expanduser("~/.cache/gum/gum.db")
@@ -127,42 +134,6 @@ async def get_propositions(
             # Convert to response format
             proposition_responses = []
             for prop in propositions_result.scalars():
-                # Load latest ambiguity analysis (if any)
-                ambiguity_score = None
-                ambiguity_flag = None
-                try:
-                    aa_q = (
-                        select(AmbiguityAnalysis)
-                        .where(AmbiguityAnalysis.proposition_id == prop.id)
-                        .order_by(AmbiguityAnalysis.id.desc())
-                        .limit(1)
-                    )
-                    aa_res = await session.execute(aa_q)
-                    aa = aa_res.scalars().first()
-                    if aa:
-                        ambiguity_score = aa.entropy_score
-                        ambiguity_flag = aa.is_ambiguous
-                except Exception:
-                    ambiguity_score = None
-                    ambiguity_flag = None
-
-                # Load urgency assessment (if any)
-                urgency_level = None
-                urgency_score = None
-                time_sensitive = None
-                should_clarify_by = None
-                try:
-                    ua_q = select(UrgencyAssessment).where(UrgencyAssessment.proposition_id == prop.id).limit(1)
-                    ua_res = await session.execute(ua_q)
-                    ua = ua_res.scalars().first()
-                    if ua:
-                        urgency_level = ua.urgency_level
-                        urgency_score = ua.urgency_score
-                        time_sensitive = ua.time_sensitive
-                        should_clarify_by = ua.should_clarify_by.isoformat() if ua.should_clarify_by else None
-                except Exception:
-                    pass
-                
                 proposition_responses.append(PropositionResponse(
                     id=prop.id,
                     text=prop.text,
@@ -174,12 +145,6 @@ async def get_propositions(
                     revision_group=prop.revision_group,
                     version=prop.version,
                     observation_count=len(prop.observations) if prop.observations else 0,
-                    entropy_score=ambiguity_score,
-                    is_ambiguous=ambiguity_flag,
-                    urgency_level=urgency_level,
-                    urgency_score=urgency_score,
-                    time_sensitive=time_sensitive,
-                    should_clarify_by=should_clarify_by,
                 ))
             
             return PropositionsListResponse(
@@ -205,34 +170,6 @@ async def get_proposition(proposition_id: int):
             if not proposition:
                 raise HTTPException(status_code=404, detail="Proposition not found")
 
-            # Load ambiguity/urgency for single proposition
-            ambiguity_score = None
-            ambiguity_flag = None
-            aa_q = (
-                select(AmbiguityAnalysis)
-                .where(AmbiguityAnalysis.proposition_id == proposition.id)
-                .order_by(AmbiguityAnalysis.id.desc())
-                .limit(1)
-            )
-            aa_res = await session.execute(aa_q)
-            aa = aa_res.scalars().first()
-            if aa:
-                ambiguity_score = aa.entropy_score
-                ambiguity_flag = aa.is_ambiguous
-
-            urgency_level = None
-            urgency_score = None
-            time_sensitive = None
-            should_clarify_by = None
-            ua_q = select(UrgencyAssessment).where(UrgencyAssessment.proposition_id == proposition.id).limit(1)
-            ua_res = await session.execute(ua_q)
-            ua = ua_res.scalars().first()
-            if ua:
-                urgency_level = ua.urgency_level
-                urgency_score = ua.urgency_score
-                time_sensitive = ua.time_sensitive
-                should_clarify_by = ua.should_clarify_by.isoformat() if ua.should_clarify_by else None
-
             return PropositionResponse(
                 id=proposition.id,
                 text=proposition.text,
@@ -244,12 +181,6 @@ async def get_proposition(proposition_id: int):
                 revision_group=proposition.revision_group,
                 version=proposition.version,
                 observation_count=len(proposition.observations) if proposition.observations else 0,
-                entropy_score=ambiguity_score,
-                is_ambiguous=ambiguity_flag,
-                urgency_level=urgency_level,
-                urgency_score=urgency_score,
-                time_sensitive=time_sensitive,
-                should_clarify_by=should_clarify_by,
             )
             
     except HTTPException:
@@ -266,6 +197,108 @@ async def health_check():
         "database_path": db_path,
         "database_exists": os.path.exists(db_path)
     }
+
+@app.get("/api/propositions/{proposition_id}/clarification", response_model=ClarificationAnalysisResponse)
+async def get_clarification_analysis(proposition_id: int):
+    """Get clarification analysis for a specific proposition"""
+    if not Session:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    try:
+        async with Session() as session:
+            # Check if proposition exists
+            proposition = await session.get(Proposition, proposition_id)
+            if not proposition:
+                raise HTTPException(status_code=404, detail="Proposition not found")
+            
+            # Get clarification analysis
+            analysis_result = await session.execute(
+                select(ClarificationAnalysis)
+                .where(ClarificationAnalysis.proposition_id == proposition_id)
+                .order_by(ClarificationAnalysis.created_at.desc())
+                .limit(1)
+            )
+            analysis = analysis_result.scalar_one_or_none()
+            
+            if not analysis:
+                return ClarificationAnalysisResponse(has_analysis=False)
+            
+            # Get triggered factor names from the dictionary
+            triggered = analysis.triggered_factors.get("factors", [])
+            
+            return ClarificationAnalysisResponse(
+                has_analysis=True,
+                needs_clarification=analysis.needs_clarification,
+                clarification_score=analysis.clarification_score,
+                triggered_factors=triggered,
+                reasoning=analysis.reasoning_log,
+                factor_scores={
+                    "identity_mismatch": analysis.factor_1_identity,
+                    "surveillance": analysis.factor_2_surveillance,
+                    "inferred_intent": analysis.factor_3_intent,
+                    "face_threat": analysis.factor_4_face_threat,
+                    "over_positive": analysis.factor_5_over_positive,
+                    "opacity": analysis.factor_6_opacity,
+                    "generalization": analysis.factor_7_generalization,
+                    "privacy": analysis.factor_8_privacy,
+                    "actor_observer": analysis.factor_9_actor_observer,
+                    "reputation_risk": analysis.factor_10_reputation,
+                    "ambiguity": analysis.factor_11_ambiguity,
+                    "tone_imbalance": analysis.factor_12_tone,
+                },
+                created_at=analysis.created_at.isoformat() if analysis.created_at else None
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/propositions/flagged", response_model=List[FlaggedPropositionResponse])
+async def get_flagged_propositions(limit: int = 50):
+    """Get propositions flagged for clarification"""
+    if not Session:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    try:
+        async with Session() as session:
+            # Query propositions with clarification analyses where needs_clarification=True
+            query = (
+                select(Proposition, ClarificationAnalysis)
+                .join(ClarificationAnalysis, Proposition.id == ClarificationAnalysis.proposition_id)
+                .where(ClarificationAnalysis.needs_clarification == True)
+                .order_by(ClarificationAnalysis.clarification_score.desc())
+                .limit(limit)
+            )
+            
+            results = await session.execute(query)
+            
+            flagged_responses = []
+            for prop, analysis in results:
+                triggered = analysis.triggered_factors.get("factors", [])
+                
+                flagged_responses.append(FlaggedPropositionResponse(
+                    proposition=PropositionResponse(
+                        id=prop.id,
+                        text=prop.text,
+                        reasoning=prop.reasoning,
+                        confidence=prop.confidence,
+                        decay=prop.decay,
+                        created_at=prop.created_at.isoformat() if prop.created_at else "",
+                        updated_at=prop.updated_at.isoformat() if prop.updated_at else "",
+                        revision_group=prop.revision_group,
+                        version=prop.version,
+                        observation_count=len(prop.observations) if prop.observations else 0,
+                    ),
+                    clarification_score=analysis.clarification_score,
+                    triggered_factors=triggered,
+                    reasoning=analysis.reasoning_log
+                ))
+            
+            return flagged_responses
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

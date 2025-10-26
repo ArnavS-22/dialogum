@@ -34,6 +34,7 @@ from .schemas import (
 from gum.prompts.gum import AUDIT_PROMPT, PROPOSE_PROMPT, REVISE_PROMPT, SIMILAR_PROMPT
 from .batcher import ObservationBatcher
 from .config import GumConfig
+from .clarification import ClarificationDetector
 
 class gum:
     """A class for managing general user models.
@@ -278,6 +279,13 @@ class gum:
                 await self._handle_identical(session, identical, observations)
                 await self._handle_similar(session, similar, observations)
                 await self._handle_different(session, different, observations)
+                
+                # Run clarification detection on new propositions (if enabled)
+                if self.config.clarification.enabled:
+                    await self._run_clarification_detection(session, different)
+                
+                # Commit all changes
+                await session.commit()
                 
                 # Observations are already removed from queue by pop_batch()
                 self.logger.info(f"Completed processing batch of {len(batched_observations)} observations")
@@ -528,6 +536,51 @@ class gum:
                 await self._attach_obs_if_missing(p, obs, session)
             
             # Mixed-initiative removed
+
+    async def _run_clarification_detection(
+        self, session: AsyncSession, propositions: list[Proposition]
+    ) -> None:
+        """
+        Run clarification detection on new propositions.
+        
+        Args:
+            session: Database session
+            propositions: List of propositions to analyze
+        """
+        if not propositions:
+            return
+        
+        self.logger.info(f"Running clarification detection on {len(propositions)} propositions...")
+        
+        # Initialize detector
+        detector = ClarificationDetector(self.client, self.config)
+        
+        # Analyze each proposition
+        for prop in propositions:
+            try:
+                analysis = await detector.analyze(prop, session)
+                
+                if analysis.needs_clarification:
+                    self.logger.info(
+                        f"Proposition {prop.id} flagged for clarification "
+                        f"(score={analysis.clarification_score:.2f})"
+                    )
+                    
+                    # In shadow mode, just log; otherwise could enqueue for Gates
+                    if not self.config.clarification.shadow_mode:
+                        # TODO: Implement Gates integration
+                        self.logger.info(f"Would route to Gates (not implemented yet)")
+                else:
+                    self.logger.debug(
+                        f"Proposition {prop.id} does not need clarification "
+                        f"(score={analysis.clarification_score:.2f})"
+                    )
+                    
+            except Exception as e:
+                self.logger.error(
+                    f"Error analyzing proposition {prop.id} for clarification: {e}"
+                )
+                # Continue with other propositions even if one fails
 
     async def _handle_audit(self, obs: Observation) -> bool:
         if not self.audit_enabled:

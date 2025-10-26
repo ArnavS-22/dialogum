@@ -42,14 +42,6 @@ class PropositionResponse(BaseModel):
     revision_group: str
     version: int
     observation_count: int
-    # Ambiguity
-    entropy_score: Optional[float] = None
-    is_ambiguous: Optional[bool] = None
-    # Urgency
-    urgency_level: Optional[str] = None
-    urgency_score: Optional[float] = None
-    time_sensitive: Optional[bool] = None
-    should_clarify_by: Optional[str] = None
 
 class PropositionsListResponse(BaseModel):
     propositions: List[PropositionResponse]
@@ -118,47 +110,6 @@ async def get_propositions(
                 obs_query = "SELECT COUNT(*) FROM observation_proposition WHERE proposition_id = ?"
                 async with db.execute(obs_query, (row[0],)) as obs_cursor:
                     observation_count = (await obs_cursor.fetchone())[0]
-
-                # Load latest ambiguity analysis (if any)
-                entropy_score = None
-                is_ambiguous = None
-                async with db.execute(
-                    """
-                    SELECT entropy_score, is_ambiguous
-                    FROM ambiguity_analyses
-                    WHERE proposition_id = ?
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (row[0],)
-                ) as aa_cur:
-                    aa_row = await aa_cur.fetchone()
-                    if aa_row:
-                        entropy_score, is_ambiguous = aa_row[0], bool(aa_row[1])
-
-                # Load urgency assessment (if any)
-                urgency_level = None
-                urgency_score = None
-                time_sensitive = None
-                should_clarify_by = None
-                async with db.execute(
-                    """
-                    SELECT urgency_level, urgency_score, time_sensitive, should_clarify_by
-                    FROM urgency_assessments
-                    WHERE proposition_id = ?
-                    LIMIT 1
-                    """,
-                    (row[0],)
-                ) as ua_cur:
-                    ua_row = await ua_cur.fetchone()
-                    if ua_row:
-                        urgency_level = ua_row[0]
-                        urgency_score = ua_row[1]
-                        time_sensitive = bool(ua_row[2]) if ua_row[2] is not None else None
-                        should_clarify_by = (
-                            ua_row[3] if isinstance(ua_row[3], str) else 
-                            (ua_row[3].isoformat() if ua_row[3] else None)
-                        )
                 
                 proposition_responses.append(PropositionResponse(
                     id=prop_data['id'],
@@ -171,12 +122,6 @@ async def get_propositions(
                     revision_group=prop_data['revision_group'],
                     version=prop_data['version'],
                     observation_count=observation_count,
-                    entropy_score=entropy_score,
-                    is_ambiguous=is_ambiguous,
-                    urgency_level=urgency_level,
-                    urgency_score=urgency_score,
-                    time_sensitive=time_sensitive,
-                    should_clarify_by=should_clarify_by,
                 ))
             
             return PropositionsListResponse(

@@ -15,13 +15,6 @@ interface Proposition {
   revision_group: string;
   version: number;
   observation_count: number;
-  // Ambiguity/Urgency
-  entropy_score?: number | null;
-  is_ambiguous?: boolean | null;
-  urgency_level?: string | null;
-  urgency_score?: number | null;
-  time_sensitive?: boolean | null;
-  should_clarify_by?: string | null;
 }
 
 interface PropositionsResponse {
@@ -86,19 +79,6 @@ export default function PropositionsPage() {
     }
   };
 
-  const getUrgencyColor = (level?: string | null) => {
-    switch (level) {
-      case 'URGENT':
-        return 'text-red-400';
-      case 'SOON':
-        return 'text-yellow-400';
-      case 'LATER':
-        return 'text-gray-400';
-      default:
-        return 'text-white';
-    }
-  };
-
   const getConfidenceColor = (confidence: number | null) => {
     if (!confidence) return 'text-gray-400';
     if (confidence >= 8) return 'text-green-400';
@@ -143,30 +123,16 @@ export default function PropositionsPage() {
             GUM Propositions
           </h1>
           <p className="text-gray-300">
-            {totalCount} propositions • Ambiguity and urgency overview
+            {totalCount} propositions • Confidence overview
           </p>
         </div>
 
         {/* Simple Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 gap-4 mb-8">
           <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <BorderTrail size={40} />
             <div className="text-2xl font-bold text-white">{totalCount}</div>
             <div className="text-sm text-gray-300">Total</div>
-          </div>
-          <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
-            <BorderTrail size={40} />
-            <div className="text-2xl font-bold text-red-400">
-              {propositions.filter(p => p.urgency_level === 'URGENT').length}
-            </div>
-            <div className="text-sm text-gray-300">Urgent</div>
-          </div>
-          <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
-            <BorderTrail size={40} />
-            <div className="text-2xl font-bold text-yellow-400">
-              {propositions.filter(p => p.is_ambiguous).length}
-            </div>
-            <div className="text-sm text-gray-300">Ambiguous</div>
           </div>
           <div className="relative rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <BorderTrail size={40} />
@@ -196,24 +162,16 @@ export default function PropositionsPage() {
                 </div>
               </div>
 
-              {(proposition.entropy_score != null || proposition.urgency_level) && (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    {proposition.entropy_score != null && (
-                      <span className="text-sm text-gray-300">Entropy: {proposition.entropy_score?.toFixed?.(2) ?? proposition.entropy_score}</span>
-                    )}
-                    {proposition.urgency_level && (
-                      <span className={`text-sm ${getUrgencyColor(proposition.urgency_level)}`}>{proposition.urgency_level}</span>
-                    )}
-                    <span className="text-sm text-gray-300">
-                      {proposition.observation_count} obs
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {new Date(proposition.created_at).toLocaleString()}
-                  </div>
+              <div className="flex items-center justify-between mt-4">
+                <div className="flex items-center gap-4">
+                  <span className="text-sm text-gray-300">
+                    {proposition.observation_count} observations
+                  </span>
                 </div>
-              )}
+                <div className="text-xs text-gray-400">
+                  {new Date(proposition.created_at).toLocaleString()}
+                </div>
+              </div>
             </div>
           ))}
         </div>

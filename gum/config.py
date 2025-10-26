@@ -44,14 +44,26 @@ class AttentionConfig:
     max_distraction_penalty: float = 0.5
 
 @dataclass
+class ClarificationConfig:
+    """Configuration for clarification detection system."""
+    enabled: bool = True
+    shadow_mode: bool = True  # Collect data but don't route to Gates yet
+    threshold: float = 0.6  # Aggregate score threshold for flagging
+    model: str = "gpt-4-turbo"  # LLM model to use
+    temperature: float = 0.1  # Low temperature for consistency
+
+
+@dataclass
 class GumConfig:
     """Main configuration for GUM system."""
     decision: DecisionConfig
     attention: AttentionConfig
+    clarification: ClarificationConfig
     
     def __init__(self):
         self.decision = DecisionConfig()
         self.attention = AttentionConfig()
+        self.clarification = ClarificationConfig()
         
         # Load from environment variables if available
         self._load_from_env()
@@ -71,6 +83,14 @@ class GumConfig:
         if os.getenv('ATTENTION_HISTORY_WINDOW'):
             self.attention.history_window_seconds = int(os.getenv('ATTENTION_HISTORY_WINDOW'))
             
+        # Clarification config
+        if os.getenv('CLARIFICATION_ENABLED'):
+            self.clarification.enabled = os.getenv('CLARIFICATION_ENABLED').lower() == 'true'
+        if os.getenv('CLARIFICATION_SHADOW_MODE'):
+            self.clarification.shadow_mode = os.getenv('CLARIFICATION_SHADOW_MODE').lower() == 'true'
+        if os.getenv('CLARIFICATION_MODEL'):
+            self.clarification.model = os.getenv('CLARIFICATION_MODEL')
+            
     @classmethod
     def load_from_dict(cls, config_dict: Dict) -> 'GumConfig':
         """Load configuration from a dictionary."""
@@ -85,6 +105,11 @@ class GumConfig:
             for key, value in config_dict['attention'].items():
                 if hasattr(config.attention, key):
                     setattr(config.attention, key, value)
+                    
+        if 'clarification' in config_dict:
+            for key, value in config_dict['clarification'].items():
+                if hasattr(config.clarification, key):
+                    setattr(config.clarification, key, value)
                     
         return config
 

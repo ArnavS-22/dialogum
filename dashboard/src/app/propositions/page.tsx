@@ -14,13 +14,6 @@ interface Proposition {
   revision_group: string;
   version: number;
   observation_count: number;
-  // Ambiguity/Urgency
-  entropy_score?: number | null;
-  is_ambiguous?: boolean | null;
-  urgency_level?: string | null;
-  urgency_score?: number | null;
-  time_sensitive?: boolean | null;
-  should_clarify_by?: string | null;
 }
 
 interface PropositionsResponse {
@@ -57,18 +50,6 @@ export default function PropositionsPage() {
     }
   };
 
-  const getUrgencyColor = (level?: string | null) => {
-    switch (level) {
-      case 'URGENT':
-        return 'text-red-400';
-      case 'SOON':
-        return 'text-yellow-400';
-      case 'LATER':
-        return 'text-gray-400';
-      default:
-        return 'text-white';
-    }
-  };
 
   const getConfidenceColor = (confidence: number | null) => {
     if (!confidence) return 'text-gray-400';
@@ -119,22 +100,10 @@ export default function PropositionsPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <div className="text-2xl font-bold text-white">{totalCount}</div>
             <div className="text-sm text-gray-300">Total Propositions</div>
-          </div>
-          <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
-            <div className="text-2xl font-bold text-red-400">
-              {propositions.filter(p => p.urgency_level === 'URGENT').length}
-            </div>
-            <div className="text-sm text-gray-300">Urgent Clarifications</div>
-          </div>
-          <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
-            <div className="text-2xl font-bold text-yellow-400">
-              {propositions.filter(p => p.is_ambiguous).length}
-            </div>
-            <div className="text-sm text-gray-300">Ambiguous</div>
           </div>
           <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm">
             <div className="text-2xl font-bold text-blue-400">
@@ -174,52 +143,6 @@ export default function PropositionsPage() {
                   {proposition.reasoning}
                 </p>
               </div>
-
-              {/* Ambiguity & Urgency */}
-              {(proposition.entropy_score != null || proposition.urgency_level) && (
-                <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-white">Ambiguity & Urgency</span>
-                    {proposition.urgency_level && (
-                      <span className={`text-lg ${getUrgencyColor(proposition.urgency_level)}`}>
-                        {proposition.urgency_level}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    {proposition.entropy_score != null && (
-                      <div>
-                        <span className="text-gray-400">Entropy:</span>
-                        <span className="text-white ml-1">{proposition.entropy_score?.toFixed?.(2) ?? proposition.entropy_score}</span>
-                      </div>
-                    )}
-                    {proposition.is_ambiguous != null && (
-                      <div>
-                        <span className="text-gray-400">Ambiguous:</span>
-                        <span className="text-white ml-1">{proposition.is_ambiguous ? 'Yes' : 'No'}</span>
-                      </div>
-                    )}
-                    {proposition.urgency_score != null && (
-                      <div>
-                        <span className="text-gray-400">Urgency score:</span>
-                        <span className="text-white ml-1">{proposition.urgency_score?.toFixed?.(2) ?? proposition.urgency_score}</span>
-                      </div>
-                    )}
-                    {proposition.time_sensitive != null && (
-                      <div>
-                        <span className="text-gray-400">Time sensitive:</span>
-                        <span className="text-white ml-1">{proposition.time_sensitive ? 'Yes' : 'No'}</span>
-                      </div>
-                    )}
-                    {proposition.should_clarify_by && (
-                      <div>
-                        <span className="text-gray-400">Clarify by:</span>
-                        <span className="text-white ml-1">{new Date(proposition.should_clarify_by).toLocaleString()}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Actions */}
               <div className="flex items-center justify-between">

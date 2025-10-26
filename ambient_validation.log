@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/arnavsharma/gum-elicitation/validate_against_ambient.py", line 10, in <module>
-    from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, roc_curve, auc
-ModuleNotFoundError: No module named 'sklearn'
