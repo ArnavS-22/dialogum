@@ -203,17 +203,6 @@ Command-line interface entry point. Supports:
 - Resetting cache
 - Configuring batch sizes and models
 
-### Elicitation (Active Learning)
-
-**`gum/elicitation/`** - Active learning agents  
-Experimental active learning functionality:
-- `base_active_learning_agent.py`: Base class for AL agents
-- `pool_based_agent.py`: Pool-based active learning
-- `generative_questions_agent.py`: Generate clarifying questions
-- `generative_edge_cases_agent.py`: Generate edge case scenarios
-- `from_saved_file_agent.py`: Load AL data from file
-- `run_human_evaluation.py`, `run_model_evaluation.py`: Evaluation scripts
-
 ## Key Workflows
 
 ### Starting a GUM Instance
