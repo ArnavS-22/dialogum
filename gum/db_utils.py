@@ -8,8 +8,14 @@ from datetime import datetime, timezone
 from typing import List
 
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+    TfidfVectorizer = None  # Will raise error if used
+    cosine_similarity = None
 
 from sqlalchemy import (
     MetaData,

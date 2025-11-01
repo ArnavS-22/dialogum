@@ -6,6 +6,7 @@ A Python package for managing user feedback and interactions.
 
 __version__ = "0.1.2"
 
-from .gum import gum
+# Lazy import to avoid dependency issues
+# from .gum import gum
 
-__all__ = ["gum"] 
+__all__ = []  # "gum" 

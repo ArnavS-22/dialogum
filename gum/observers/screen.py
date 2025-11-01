@@ -14,7 +14,12 @@ from typing import Any, Dict, Iterable, List, Optional
 import asyncio
 
 # — Third-party —
-import mss
+try:
+    import mss
+    HAS_MSS = True
+except ImportError:
+    HAS_MSS = False
+    mss = None
 import Quartz
 from PIL import Image
 from pynput import mouse           # still synchronous
