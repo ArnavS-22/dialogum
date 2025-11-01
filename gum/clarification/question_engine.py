@@ -6,6 +6,7 @@ This module provides:
 - Pipeline execution (load -> filter -> generate -> validate -> write)
 - Statistics tracking
 - JSONL output
+- Database persistence (optional)
 """
 
 import json
@@ -37,7 +38,8 @@ class ClarifyingQuestionEngine:
         config: Any,
         input_source: str = "file",
         input_file_path: Optional[str] = None,
-        output_path: Optional[str] = None
+        output_path: Optional[str] = None,
+        db_session: Optional[AsyncSession] = None
     ):
         """
         Initialize the question engine.
@@ -48,11 +50,13 @@ class ClarifyingQuestionEngine:
             input_source: "file" or "db"
             input_file_path: Path to input file (for file source)
             output_path: Path to output JSONL file
+            db_session: Optional database session for saving questions
         """
         self.client = openai_client
         self.config = config
         self.input_source = input_source
         self.input_file_path = input_file_path
+        self.db_session = db_session
         
         # Set default output path
         if output_path is None:
@@ -116,7 +120,7 @@ class ClarifyingQuestionEngine:
         propositions = await load_flagged_propositions(
             source=self.input_source,
             file_path=self.input_file_path,
-            db_session=db_session
+            db_session=db_session if db_session else self.db_session
         )
         
         logger.info(f"Loaded {len(propositions)} flagged propositions")
@@ -174,6 +178,10 @@ class ClarifyingQuestionEngine:
         # Step 5: Write output
         self._write_jsonl(results)
         
+        # Step 5b: Save to database if session provided
+        if self.db_session:
+            await self._save_to_database(results)
+        
         # Step 6: Generate summary
         elapsed = (datetime.now() - start_time).total_seconds()
         
@@ -219,6 +227,10 @@ class ClarifyingQuestionEngine:
             logger.error(f"Invalid factor name: {factor_name}")
             return None
         
+        # Get factor score from proposition data if available
+        factor_scores = prop.get("factor_scores", {})
+        factor_score = factor_scores.get(factor_name, 0.0)
+        
         # Generate question
         try:
             result = await self.generator.generate_question_pair(
@@ -236,6 +248,10 @@ class ClarifyingQuestionEngine:
         obs_ids = self._get_observation_ids(observations)
         is_valid, errors = self.validator.validate_full_output(result, obs_ids)
         
+        # Add validation metadata
+        result["validation_passed"] = is_valid
+        result["validation_warnings"] = errors if not is_valid else []
+        
         if not is_valid:
             logger.warning(f"Validation failed for prop {prop_id}, factor {factor_name}: {errors}")
             self.stats["validation_errors"] += 1
@@ -251,6 +267,7 @@ class ClarifyingQuestionEngine:
         # Add metadata
         result["prop_text"] = prop_text
         result["timestamp"] = datetime.now().isoformat()
+        result["factor_score"] = factor_score
         
         return result
     
@@ -295,6 +312,97 @@ class ClarifyingQuestionEngine:
                 f.write(json_line + "\n")
         
         logger.info(f"Successfully wrote {len(results)} results")
+    
+    async def _save_to_database(self, results: List[Dict[str, Any]]) -> None:
+        """
+        Save generated questions to the database.
+        
+        Args:
+            results: List of result dicts from question generation
+        """
+        if not self.db_session:
+            logger.warning("No database session available, skipping DB save")
+            return
+        
+        logger.info(f"Saving {len(results)} questions to database")
+        
+        # Import here to avoid circular imports
+        from ..clarification_models import ClarifyingQuestion
+        from sqlalchemy import select
+        
+        saved_count = 0
+        skipped_count = 0
+        
+        for result in results:
+            try:
+                # Extract data from result dict
+                prop_id = result.get('prop_id')
+                factor = result.get('factor')
+                question = result.get('question')
+                reasoning = result.get('reasoning')
+                evidence = result.get('evidence', [])
+                generation_method = result.get('method', 'unknown')
+                validation_passed = result.get('validation_passed', True)
+                validation_warnings = result.get('validation_warnings', [])
+                factor_score = result.get('factor_score', 0.0)
+                
+                # Skip if essential data is missing
+                if not all([prop_id, factor, question, reasoning]):
+                    logger.warning(f"Skipping result with missing data: {result}")
+                    skipped_count += 1
+                    continue
+                
+                # Get factor ID
+                factor_id = get_factor_id_from_name(factor)
+                if factor_id is None:
+                    logger.error(f"Invalid factor name: {factor}, skipping")
+                    skipped_count += 1
+                    continue
+                
+                # Get analysis ID if available
+                analysis_id = None
+                if self.input_source == "db":
+                    # Try to find corresponding analysis
+                    from ..clarification_models import ClarificationAnalysis
+                    analysis_query = select(ClarificationAnalysis).where(
+                        ClarificationAnalysis.proposition_id == prop_id
+                    )
+                    analysis_result = await self.db_session.execute(analysis_query)
+                    analysis = analysis_result.scalar_one_or_none()
+                    if analysis:
+                        analysis_id = analysis.id
+                
+                # Create question record
+                clarifying_question = ClarifyingQuestion(
+                    proposition_id=prop_id,
+                    analysis_id=analysis_id,
+                    factor_name=factor,
+                    factor_id=factor_id,
+                    factor_score=factor_score,
+                    question=question,
+                    reasoning=reasoning,
+                    evidence=evidence,
+                    generation_method=generation_method,
+                    model_used=self.generator.model,
+                    validation_passed=validation_passed,
+                    validation_warnings=validation_warnings
+                )
+                
+                self.db_session.add(clarifying_question)
+                saved_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error saving question to database: {e}")
+                skipped_count += 1
+                continue
+        
+        # Commit all at once
+        try:
+            await self.db_session.commit()
+            logger.info(f"Successfully saved {saved_count} questions to database, skipped {skipped_count}")
+        except Exception as e:
+            logger.error(f"Error committing questions to database: {e}")
+            await self.db_session.rollback()
 
 
 async def run_engine_simple(

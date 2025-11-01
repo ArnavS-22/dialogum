@@ -175,7 +175,22 @@ async def _load_from_db(session: AsyncSession) -> List[Dict[str, Any]]:
             "prop_text": analysis.proposition.text if hasattr(analysis, 'proposition') and analysis.proposition else "",  # Proposition model uses 'text' field
             "triggered_factors": triggered_factors,
             "observations": observations,
-            "prop_reasoning": getattr(analysis, 'reasoning_log', None)  # ClarificationAnalysis has 'reasoning_log' not 'reasoning'
+            "prop_reasoning": getattr(analysis, 'reasoning_log', None),  # ClarificationAnalysis has 'reasoning_log' not 'reasoning'
+            "clarification_score": analysis.clarification_score,
+            "factor_scores": {
+                "identity_mismatch": analysis.factor_1_identity,
+                "surveillance": analysis.factor_2_surveillance,
+                "inferred_intent": analysis.factor_3_intent,
+                "face_threat": analysis.factor_4_face_threat,
+                "over_positive": analysis.factor_5_over_positive,
+                "opacity": analysis.factor_6_opacity,
+                "generalization": analysis.factor_7_generalization,
+                "privacy": analysis.factor_8_privacy,
+                "actor_observer": analysis.factor_9_actor_observer,
+                "reputation_risk": analysis.factor_10_reputation,
+                "ambiguity": analysis.factor_11_ambiguity,
+                "tone_imbalance": analysis.factor_12_tone,
+            }
         }
         
         propositions.append(prop_dict)

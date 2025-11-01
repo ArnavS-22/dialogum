@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 
 # Import GUM models
 from gum.models import Proposition, Observation, init_db
-from gum.clarification_models import ClarificationAnalysis
+from gum.clarification_models import ClarificationAnalysis, ClarifyingQuestion
 
 app = FastAPI(title="GUM Dashboard API")
 
@@ -71,6 +71,23 @@ class FlaggedPropositionResponse(BaseModel):
     clarification_score: float
     triggered_factors: List[str]
     reasoning: str
+
+class ClarifyingQuestionResponse(BaseModel):
+    id: int
+    proposition_id: int
+    factor_name: str
+    factor_id: int
+    factor_score: float
+    question: str
+    reasoning: str
+    evidence: List[str]
+    generation_method: str
+    validation_passed: bool
+    created_at: str
+
+class ClarifyingQuestionsListResponse(BaseModel):
+    questions: List[ClarifyingQuestionResponse]
+    total_count: int
 
 # Database connection
 db_path = os.path.expanduser("~/.cache/gum/gum.db")
@@ -297,6 +314,54 @@ async def get_flagged_propositions(limit: int = 50):
             
             return flagged_responses
             
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/propositions/{proposition_id}/questions", response_model=ClarifyingQuestionsListResponse)
+async def get_clarifying_questions(proposition_id: int):
+    """Get clarifying questions for a specific proposition"""
+    if not Session:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    try:
+        async with Session() as session:
+            # Check if proposition exists
+            proposition = await session.get(Proposition, proposition_id)
+            if not proposition:
+                raise HTTPException(status_code=404, detail="Proposition not found")
+            
+            # Get clarifying questions
+            questions_query = select(ClarifyingQuestion).where(
+                ClarifyingQuestion.proposition_id == proposition_id
+            ).order_by(ClarifyingQuestion.created_at.desc())
+            
+            questions_result = await session.execute(questions_query)
+            questions = questions_result.scalars().all()
+            
+            # Convert to response format
+            question_responses = []
+            for q in questions:
+                question_responses.append(ClarifyingQuestionResponse(
+                    id=q.id,
+                    proposition_id=q.proposition_id,
+                    factor_name=q.factor_name,
+                    factor_id=q.factor_id,
+                    factor_score=q.factor_score,
+                    question=q.question,
+                    reasoning=q.reasoning,
+                    evidence=q.evidence,
+                    generation_method=q.generation_method,
+                    validation_passed=q.validation_passed,
+                    created_at=q.created_at.isoformat() if q.created_at else ""
+                ))
+            
+            return ClarifyingQuestionsListResponse(
+                questions=question_responses,
+                total_count=len(question_responses)
+            )
+            
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 

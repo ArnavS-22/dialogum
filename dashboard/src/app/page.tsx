@@ -4,6 +4,25 @@ import { useState, useEffect } from "react";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { BorderTrail } from "@/components/ui/border-trail";
 
+interface ClarifyingQuestion {
+  id: number;
+  proposition_id: number;
+  factor_name: string;
+  factor_id: number;
+  factor_score: number;
+  question: string;
+  reasoning: string;
+  evidence: string[];
+  generation_method: string;
+  validation_passed: boolean;
+  created_at: string;
+}
+
+interface ClarifyingQuestionsResponse {
+  questions: ClarifyingQuestion[];
+  total_count: number;
+}
+
 interface Proposition {
   id: number;
   text: string;
@@ -15,6 +34,7 @@ interface Proposition {
   revision_group: string;
   version: number;
   observation_count: number;
+  clarifying_questions?: ClarifyingQuestion[];  // Questions embedded
 }
 
 interface PropositionsResponse {
@@ -27,6 +47,7 @@ export default function PropositionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
+  const [filterMode, setFilterMode] = useState<'all' | 'with_questions' | 'without_questions'>('all');
 
   useEffect(() => {
     fetchPropositions();
@@ -42,8 +63,27 @@ export default function PropositionsPage() {
         });
         if (!response.ok) return;
         const data: PropositionsResponse = await response.json();
+        
+        // Fetch questions for each proposition
+        const propositionsWithQuestions = await Promise.all(
+          data.propositions.map(async (prop) => {
+            try {
+              const qResponse = await fetch(`http://localhost:8000/api/propositions/${prop.id}/questions`, {
+                cache: 'no-store',
+              });
+              if (qResponse.ok) {
+                const qData: ClarifyingQuestionsResponse = await qResponse.json();
+                return { ...prop, clarifying_questions: qData.questions };
+              }
+            } catch {
+              // Swallow errors
+            }
+            return { ...prop, clarifying_questions: [] };
+          })
+        );
+        
         if (!isCancelled) {
-          setPropositions(data.propositions);
+          setPropositions(propositionsWithQuestions);
           setTotalCount(data.total_count);
         }
       } catch {
@@ -70,7 +110,26 @@ export default function PropositionsPage() {
       }
       
       const data: PropositionsResponse = await response.json();
-      setPropositions(data.propositions);
+      
+      // Fetch questions for each proposition in parallel
+      const propositionsWithQuestions = await Promise.all(
+        data.propositions.map(async (prop) => {
+          try {
+            const qResponse = await fetch(`http://localhost:8000/api/propositions/${prop.id}/questions`, {
+              cache: 'no-store',
+            });
+            if (qResponse.ok) {
+              const qData: ClarifyingQuestionsResponse = await qResponse.json();
+              return { ...prop, clarifying_questions: qData.questions };
+            }
+          } catch {
+            // Swallow errors for individual question fetches
+          }
+          return { ...prop, clarifying_questions: [] };
+        })
+      );
+      
+      setPropositions(propositionsWithQuestions);
       setTotalCount(data.total_count);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch propositions');
@@ -84,6 +143,18 @@ export default function PropositionsPage() {
     if (confidence >= 8) return 'text-green-400';
     if (confidence >= 6) return 'text-yellow-400';
     return 'text-red-400';
+  };
+
+  const getFactorColor = (factorScore: number) => {
+    if (factorScore >= 0.8) return 'bg-red-500/20 text-red-300 border-red-500/50';
+    if (factorScore >= 0.6) return 'bg-yellow-500/20 text-yellow-300 border-yellow-500/50';
+    return 'bg-blue-500/20 text-blue-300 border-blue-500/50';
+  };
+
+  const getFactorScoreColor = (factorScore: number) => {
+    if (factorScore >= 0.8) return 'text-red-400';
+    if (factorScore >= 0.6) return 'text-yellow-400';
+    return 'text-blue-400';
   };
 
   if (loading) {
@@ -144,39 +215,140 @@ export default function PropositionsPage() {
         </div>
 
         {/* Propositions - Simple Cards */}
-        <div className="space-y-4">
-          {propositions.map((proposition) => (
-            <div
-              key={proposition.id}
-              className="relative rounded-xl bg-white/10 p-6 backdrop-blur-sm border border-white/20 hover:bg-white/15 transition-all duration-300"
-            >
-              <BorderTrail size={60} />
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-white mb-2">
-                    {proposition.text}
-                  </h3>
-                </div>
-                <div className={`text-2xl ${getConfidenceColor(proposition.confidence)}`}>
-                  {proposition.confidence || '?'}/10
-                </div>
+        {(() => {
+          const filteredPropositions = propositions.filter((proposition) => {
+            const hasQuestions = proposition.clarifying_questions && proposition.clarifying_questions.length > 0;
+            if (filterMode === 'all') return true;
+            if (filterMode === 'with_questions') return hasQuestions;
+            if (filterMode === 'without_questions') return !hasQuestions;
+            return true;
+          });
+          
+          const withQuestionsCount = propositions.filter(p => p.clarifying_questions && p.clarifying_questions.length > 0).length;
+          const withoutQuestionsCount = propositions.length - withQuestionsCount;
+          
+          return (
+            <>
+              {/* Filter Buttons */}
+              <div className="mb-6 flex gap-3">
+                <button
+                  onClick={() => setFilterMode('all')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    filterMode === 'all'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                  }`}
+                >
+                  All ({propositions.length})
+                </button>
+                <button
+                  onClick={() => setFilterMode('with_questions')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    filterMode === 'with_questions'
+                      ? 'bg-green-500 text-white'
+                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                  }`}
+                >
+                  With Questions ({withQuestionsCount})
+                </button>
+                <button
+                  onClick={() => setFilterMode('without_questions')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    filterMode === 'without_questions'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                  }`}
+                >
+                  Without Questions ({withoutQuestionsCount})
+                </button>
               </div>
 
-              <div className="flex items-center justify-between mt-4">
-                <div className="flex items-center gap-4">
-                  <span className="text-sm text-gray-300">
-                    {proposition.observation_count} observations
-                  </span>
+              {filteredPropositions.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="text-6xl mb-4">🔍</div>
+                  <h3 className="text-xl font-semibold text-white mb-2">No Matching Propositions</h3>
+                  <p className="text-gray-300 mb-6">
+                    No propositions match the "{filterMode === 'with_questions' ? 'With Questions' : filterMode === 'without_questions' ? 'Without Questions' : 'All'}" filter
+                  </p>
+                  <button
+                    onClick={() => setFilterMode('all')}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  >
+                    Show All Propositions
+                  </button>
                 </div>
-                <div className="text-xs text-gray-400">
-                  {new Date(proposition.created_at).toLocaleString()}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredPropositions.map((proposition) => (
+                    <div
+                      key={proposition.id}
+                      className="relative rounded-xl bg-white/10 p-6 backdrop-blur-sm border border-white/20 hover:bg-white/15 transition-all duration-300"
+                    >
+                      <BorderTrail size={60} />
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-white mb-2">
+                            {proposition.text}
+                          </h3>
+                        </div>
+                        <div className={`text-2xl ${getConfidenceColor(proposition.confidence)}`}>
+                          {proposition.confidence || '?'}/10
+                        </div>
+                      </div>
 
-        {propositions.length === 0 && (
+                      <div className="flex items-center justify-between mt-4 mb-4">
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm text-gray-300">
+                            {proposition.observation_count} observations
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {new Date(proposition.created_at).toLocaleString()}
+                        </div>
+                      </div>
+
+                      {/* Clarifying Questions Display */}
+                      {proposition.clarifying_questions && proposition.clarifying_questions.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-white/20">
+                          <h4 className="text-sm font-semibold text-white mb-3">
+                            Clarifying Questions ({proposition.clarifying_questions.length})
+                          </h4>
+                          <div className="space-y-3">
+                            {proposition.clarifying_questions.map((question) => (
+                              <div
+                                key={question.id}
+                                className="relative rounded-lg bg-white/5 p-4 border border-white/10"
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${getFactorColor(question.factor_score)}`}>
+                                    {question.factor_name}
+                                  </span>
+                                  <span className={`text-sm font-bold ${getFactorScoreColor(question.factor_score)}`}>
+                                    {(question.factor_score * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+                                <p className="text-white text-sm mb-2">
+                                  {question.question}
+                                </p>
+                                {question.reasoning && (
+                                  <p className="text-gray-400 text-xs">
+                                    Why: {question.reasoning}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
+
+        {propositions.length === 0 && !loading && (
           <div className="text-center py-16">
             <div className="text-6xl mb-4">🧠</div>
             <h3 className="text-xl font-semibold text-white mb-2">No Propositions Found</h3>
@@ -189,6 +361,7 @@ export default function PropositionsPage() {
           </div>
         )}
       </div>
+
     </div>
   );
 }
