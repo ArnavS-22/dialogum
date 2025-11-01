@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from ..clarification_models import ClarificationAnalysis
-from ..models import Observation
+from ..models import Observation, Proposition, observation_proposition
+from sqlalchemy.orm import selectinload
 from .question_config import get_factor_id_from_name, validate_factor_id
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,8 @@ DEFAULT_FILE_PATH = "test_results_200_props/flagged_propositions.json"
 async def load_flagged_propositions(
     source: str = "file",
     file_path: Optional[str] = None,
-    db_session: Optional[AsyncSession] = None
+    db_session: Optional[AsyncSession] = None,
+    enrich_with_db_observations: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Load flagged propositions from file or database.
@@ -50,7 +52,13 @@ async def load_flagged_propositions(
         FileNotFoundError: If file source and file doesn't exist
     """
     if source == "file":
-        return await _load_from_file(file_path)
+        props = await _load_from_file(file_path)
+        
+        # Optionally enrich with DB observations if session provided
+        if enrich_with_db_observations and db_session:
+            props = await _enrich_with_db_observations(db_session, props)
+        
+        return props
     elif source == "db":
         if db_session is None:
             raise ValueError("db_session required when source='db'")
@@ -142,16 +150,22 @@ async def _load_from_db(session: AsyncSession) -> List[Dict[str, Any]]:
         # Get observations for this proposition
         observations = []
         if hasattr(analysis, 'proposition') and analysis.proposition:
-            # Load observations associated with this proposition
-            obs_query = select(Observation).where(
-                Observation.proposition_id == analysis.proposition_id
+            # Load observations associated with this proposition via join table
+            obs_query = (
+                select(Observation)
+                .join(observation_proposition)
+                .join(Proposition)
+                .where(Proposition.id == analysis.proposition_id)
+                .order_by(Observation.created_at.desc())
+                .limit(5)
             )
             obs_result = await session.execute(obs_query)
             observations = [
                 {
                     "id": obs.id,
                     "observation_text": obs.content,  # Observation model uses 'content' field
-                    "timestamp": obs.created_at.isoformat() if hasattr(obs, 'created_at') and obs.created_at else None
+                    "timestamp": obs.created_at.isoformat() if hasattr(obs, 'created_at') and obs.created_at else None,
+                    "source": "database"
                 }
                 for obs in obs_result.scalars().all()
             ]
@@ -214,10 +228,35 @@ def _normalize_proposition_format(prop: Dict[str, Any]) -> Optional[Dict[str, An
         logger.warning(f"Proposition {prop_id} has no valid triggered factors")
         return None
     
-    # Get observations
+    # Get observations - handle multiple formats
     observations = prop.get('observations', [])
     if not isinstance(observations, list):
         observations = []
+    
+    # If no observation objects but have observation_previews, create mock observations
+    if not observations and prop.get('observation_previews'):
+        # Create observation-like dicts from previews
+        observation_previews = prop.get('observation_previews', [])
+        observation_count = prop.get('observation_count', 0)
+        
+        # Create numbered observations from previews
+        for i, preview in enumerate(observation_previews[:5]):  # Limit to 5
+            obs_dict = {
+                'id': f"preview_{prop_id}_{i}",  # Generate ID from preview index
+                'observation_text': preview[:200] if len(preview) > 200 else preview,  # Truncate long previews
+                'source': 'preview'  # Mark as preview
+            }
+            observations.append(obs_dict)
+        
+        # If there are more observations than previews, create placeholders
+        if observation_count > len(observation_previews):
+            for i in range(len(observation_previews), min(observation_count, 5)):
+                obs_dict = {
+                    'id': f"preview_{prop_id}_{i}",
+                    'observation_text': f"[Observation {i+1} - preview not available]",
+                    'source': 'placeholder'
+                }
+                observations.append(obs_dict)
     
     # Get reasoning if present
     prop_reasoning = prop.get('prop_reasoning') or prop.get('reasoning')
@@ -263,6 +302,69 @@ def filter_propositions(
         ]
     
     return filtered
+
+
+async def _enrich_with_db_observations(
+    session: AsyncSession,
+    propositions: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Enrich file-loaded propositions with actual observations from database.
+    
+    Args:
+        session: Database session
+        propositions: List of proposition dicts from file
+        
+    Returns:
+        Enriched proposition dicts with database observations
+    """
+    from sqlalchemy import select
+    
+    enriched = []
+    
+    for prop in propositions:
+        prop_id = prop.get("prop_id")
+        if not prop_id:
+            enriched.append(prop)
+            continue
+        
+        try:
+            # Query for observations linked to this proposition
+            obs_query = (
+                select(Observation)
+                .join(observation_proposition)
+                .join(Proposition)
+                .where(Proposition.id == prop_id)
+                .order_by(Observation.created_at.desc())
+                .limit(5)
+            )
+            
+            obs_result = await session.execute(obs_query)
+            db_observations = [
+                {
+                    "id": obs.id,
+                    "observation_text": obs.content,
+                    "timestamp": obs.created_at.isoformat() if hasattr(obs, 'created_at') and obs.created_at else None,
+                    "source": "database"
+                }
+                for obs in obs_result.scalars().all()
+            ]
+            
+            # Replace preview-based observations with DB observations if available
+            if db_observations:
+                prop["observations"] = db_observations
+                logger.info(f"Enriched prop {prop_id} with {len(db_observations)} DB observations")
+            else:
+                # Keep preview-based observations if no DB observations found
+                logger.debug(f"No DB observations found for prop {prop_id}, using previews")
+        
+        except Exception as e:
+            logger.warning(f"Failed to enrich prop {prop_id} with DB observations: {e}")
+            # Keep original prop (with previews if any)
+        
+        enriched.append(prop)
+    
+    return enriched
 
 
 def get_proposition_factor_pairs(

@@ -349,16 +349,27 @@ class QuestionGenerator:
             # Handle both dict and object formats
             if isinstance(obs, dict):
                 obs_id = obs.get('id', 'unknown')
-                obs_text = obs.get('observation_text', obs.get('text', ''))
+                obs_text = obs.get('observation_text', obs.get('text', obs.get('content', '')))
+                source = obs.get('source', 'unknown')
             else:
                 obs_id = getattr(obs, 'id', 'unknown')
-                obs_text = getattr(obs, 'observation_text', '')
+                obs_text = getattr(obs, 'observation_text', getattr(obs, 'content', ''))
+                source = getattr(obs, 'source', 'unknown')
+            
+            # Skip placeholder observations in evidence
+            if source == 'placeholder':
+                continue
             
             # Truncate long observations
             if len(obs_text) > 100:
                 obs_text = obs_text[:100] + "..."
             
-            evidence.append(f"obs_{obs_id}: {obs_text}")
+            # Format evidence citation
+            if source == 'preview':
+                # Mark preview-based evidence differently
+                evidence.append(f"obs_{obs_id}: {obs_text} [from preview]")
+            else:
+                evidence.append(f"obs_{obs_id}: {obs_text}")
         
         return evidence
 

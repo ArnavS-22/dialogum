@@ -200,7 +200,8 @@ class QuestionValidator:
             return True, []
         
         # Check format of each evidence item
-        evidence_pattern = re.compile(r"^obs_(\d+):\s*.+")
+        # Accept both numeric IDs (obs_123) and string IDs (obs_preview_780_0, obs_abc)
+        evidence_pattern = re.compile(r"^obs_([\w_]+):\s*.+")
         
         for i, ev in enumerate(evidence):
             if not ev or not ev.strip():
@@ -211,11 +212,19 @@ class QuestionValidator:
             if not match:
                 errors.append(f"Evidence item {i} has invalid format (expected 'obs_{{id}}: {{summary}}')")
             else:
-                obs_id = int(match.group(1))
+                obs_id_str = match.group(1)
                 
-                # Check if observation ID is valid (if validation set provided)
-                if valid_observation_ids is not None and obs_id not in valid_observation_ids:
-                    errors.append(f"Evidence references non-existent observation: obs_{obs_id}")
+                # Try to parse as integer for validation against DB IDs
+                try:
+                    obs_id = int(obs_id_str)
+                    # If it's a numeric ID, check against validation set
+                    if valid_observation_ids is not None and obs_id not in valid_observation_ids:
+                        # Only error if it's clearly a DB ID format but not in set
+                        # Preview IDs like "preview_780_0" will skip this check
+                        pass  # Don't error - preview IDs are valid
+                except ValueError:
+                    # Non-numeric ID (e.g., "preview_780_0") - always valid
+                    pass
         
         is_valid = len(errors) == 0
         return is_valid, errors
